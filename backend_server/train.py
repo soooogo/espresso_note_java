@@ -1,9 +1,11 @@
 import pandas as pd
 import numpy as np
 import glob
+import pickle
+import os
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import matplotlib.pyplot as plt
 import japanize_matplotlib
 
@@ -16,6 +18,16 @@ for filename in all_files:
     df_list.append(pd.read_csv(filename))
 
 df = pd.concat(df_list, axis=0, ignore_index=True)
+
+# 気象データの読み込み
+try:
+    weather_df = pd.read_csv('data/weather_data.csv')
+    print("気象データを読み込みました")
+except FileNotFoundError:
+    print("気象データファイルが見つかりません。weather_data.pyを実行してデータを生成してください。")
+    # モックデータを生成
+    from weather_data import create_mock_weather_data
+    weather_df = create_mock_weather_data()
 print("--- データの結合後 (最初の5行) ---")
 print(df.head())
 print(f"\n結合後のデータ数: {len(df)}件")
@@ -27,6 +39,17 @@ print(df)
 df["Year"] = df["Day"].str.extract(r'(\d+)年').astype(int)
 df['Month'] = df['Day'].str.extract(r'(\d+)月').astype(int)
 df['Day'] = df['Day'].str.extract(r'(\d+)日').astype(int)
+
+# 気象データとの結合
+df['date_key'] = df['Year'].astype(str) + '-' + df['Month'].astype(str).str.zfill(2) + '-' + df['Day'].astype(str).str.zfill(2)
+weather_df['date_key'] = weather_df['date']
+
+# 気象データを結合
+df = pd.merge(df, weather_df[['date_key', 'temperature', 'humidity']], on='date_key', how='left')
+df = df.drop('date_key', axis=1)
+
+print("気象データを結合しました")
+print(f"気象データの欠損値: 気温={df['temperature'].isnull().sum()}, 湿度={df['humidity'].isnull().sum()}")
 
 
 
@@ -59,9 +82,9 @@ print(f"OOBスコア (学習データに対する予測精度): {model.oob_score
 # --- ステップ5: モデルの評価 ---
 y_pred = model.predict(X_test)
 
-# 正解率を確認
-accuracy = accuracy_score(y_pred, y_test)
-print(f"accuracy:{accyracy_score}")
+# 平均絶対誤差を確認
+mae = mean_absolute_error(y_test, y_pred)
+print(f"平均絶対誤差 (MAE): {mae:.4f}")
 
 # 各ターゲット変数の評価指標を計算
 mse_mesh = mean_squared_error(y_test['mesh'], y_pred[:, 0])
@@ -94,3 +117,27 @@ plt.savefig('feature_importance.png')
 print("\n--- 特徴量の重要度 ---")
 print(feature_importances_sorted)
 print("\n特徴量の重要度を 'feature_importance.png' として保存しました。")
+
+# --- ステップ7: モデルの保存 ---
+# modelディレクトリが存在しない場合は作成
+if not os.path.exists('model'):
+    os.makedirs('model')
+
+# モデルを保存
+with open('model/random_forest_model.pkl', 'wb') as f:
+    pickle.dump(model, f)
+
+# 前処理用の情報も保存（特徴量名など）
+preprocessing_info = {
+    'feature_names': X.columns.tolist(),
+    'target_names': y.columns.tolist(),
+    'categorical_columns': ['Weather'],
+    'numerical_columns': ['Day', 'Month', 'Year', 'days_passed', 'temperature', 'humidity']
+}
+
+with open('model/preprocessing_info.pkl', 'wb') as f:
+    pickle.dump(preprocessing_info, f)
+
+print("\n--- モデルの保存完了 ---")
+print("モデルを 'model/random_forest_model.pkl' として保存しました。")
+print("前処理情報を 'model/preprocessing_info.pkl' として保存しました。")

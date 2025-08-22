@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レシピ予測 - エスプレッソレシピ管理システム</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <!-- ヘッダー -->
+    <div th:replace="fragments/header :: siteHeader"></div>
+
+    <!-- メインコンテンツ -->
+    <div class="main-content">
+        <h1>レシピ予測</h1>
+        <p class="lead">天候と気温に基づいて、最適なエスプレッソレシピを予測します</p>
+        
+        <!-- 予測フォーム -->
+        <div class="card">
+            <h2>予測条件を入力</h2>
+            <form id="predictForm">
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="bean_name">コーヒー豆 *</label>
+                        <select id="bean_name" name="bean_name" class="form-control" required>
+                            <option value="">コーヒー豆を選択</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bean_origin">産地 *</label>
+                        <select id="bean_origin" name="bean_origin" class="form-control" required>
+                            <option value="">産地を選択</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="date">日付 *</label>
+                        <input type="date" id="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="weather">天候 *</label>
+                        <select id="weather" name="weather" class="form-control" required>
+                            <option value="">天候を選択</option>
+                            <option value="晴れ">晴れ</option>
+                            <option value="曇り">曇り</option>
+                            <option value="雨">雨</option>
+                            <option value="雪">雪</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="temperature">気温 (°C)</label>
+                        <input type="number" id="temperature" name="temperature" class="form-control" step="0.1" placeholder="自動取得">
+                        <small>空白の場合は現在の気温を自動取得します</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="humidity">湿度 (%)</label>
+                        <input type="number" id="humidity" name="humidity" class="form-control" step="1" placeholder="自動取得">
+                        <small>空白の場合は現在の湿度を自動取得します</small>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">予測実行</button>
+            </form>
+        </div>
+
+        <!-- 予測結果 -->
+        <div class="card" id="predictionResult" style="display: none;">
+            <h2>予測結果</h2>
+            <div id="predictionContent"></div>
+        </div>
+
+        <!-- 統計情報 -->
+        <div class="grid grid-3">
+            <div class="card">
+                <h3>天候別レシピ数</h3>
+                <div id="weatherStats" class="loading">読み込み中...</div>
+            </div>
+            <div class="card">
+                <h3>気温分布</h3>
+                <div id="temperatureStats" class="loading">読み込み中...</div>
+            </div>
+            <div class="card">
+                <h3>人気の抽出条件</h3>
+                <div id="popularConditions" class="loading">読み込み中...</div>
+            </div>
+        </div>
+
+        <!-- 最近の予測履歴 -->
+        <div class="card">
+            <h2>最近の予測履歴</h2>
+            <div id="predictionHistory" class="loading">読み込み中...</div>
+        </div>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+    <script>
+        let predictionHistory = [];
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await loadUserBeans();
+                setupEventListeners();
+                setDefaultDate();
+                loadStatistics();
+                loadPredictionHistory();
+            } catch (error) {
+                console.error('Prediction page loading failed:', error);
+                Utils.showAlert('予測ページの読み込みに失敗しました', 'danger');
+            }
+        });
+
+        function setupEventListeners() {
+            // フォーム送信イベント
+            const predictForm = document.getElementById('predictForm');
+            predictForm.addEventListener('submit', handlePredictionSubmit);
+            
+            // コーヒー豆選択時の産地自動設定
+            const beanSelect = document.getElementById('bean_name');
+            const originSelect = document.getElementById('bean_origin');
+            
+            beanSelect.addEventListener('change', function() {
+                const selectedBean = this.value;
+                if (selectedBean) {
+                    // 選択された豆の産地を自動設定
+                    const option = this.options[this.selectedIndex];
+                    const beanText = option.textContent;
+                    const originMatch = beanText.match(/\(([^)]+)\)/);
+                    if (originMatch) {
+                        const origin = originMatch[1];
+                        originSelect.value = origin;
+                    }
+                }
+            });
+        }
+
+        function setDefaultDate() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('date').value = today;
+        }
+
+        async function loadUserBeans() {
+            try {
+                const beans = await ApiService.get('/predict/user-beans');
+                if (beans && beans.length > 0) {
+                    populateBeanSelect(beans);
+                } else {
+                    // 豆が登録されていない場合
+                    const beanSelect = document.getElementById('bean_name');
+                    const originSelect = document.getElementById('bean_origin');
+                    
+                    beanSelect.innerHTML = '<option value="">コーヒー豆が登録されていません</option>';
+                    originSelect.innerHTML = '<option value="">産地を選択</option>';
+                    
+                    Utils.showAlert('登録されているコーヒー豆がありません。先に豆を登録してください。', 'warning');
+                }
+            } catch (error) {
+                console.error('Failed to load user beans:', error);
+                Utils.showAlert('コーヒー豆の読み込みに失敗しました', 'danger');
+            }
+        }
+
+        function populateBeanSelect(beans) {
+            const beanSelect = document.getElementById('bean_name');
+            const originSelect = document.getElementById('bean_origin');
+            
+            // 既存のオプションをクリア（最初の「選択してください」以外）
+            beanSelect.innerHTML = '<option value="">コーヒー豆を選択</option>';
+            originSelect.innerHTML = '<option value="">産地を選択</option>';
+            
+            // 豆の選択肢を追加
+            beans.forEach(bean => {
+                const option = document.createElement('option');
+                option.value = bean.name;
+                option.textContent = `${bean.name} (${bean.origin})`;
+                beanSelect.appendChild(option);
+            });
+            
+            // 産地の選択肢を追加（重複を除く）
+            const origins = [...new Set(beans.map(bean => bean.origin))];
+            origins.forEach(origin => {
+                const option = document.createElement('option');
+                option.value = origin;
+                option.textContent = origin;
+                originSelect.appendChild(option);
+            });
+        }
+
+        async function handlePredictionSubmit(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            
+            // バリデーション
+            if (!FormHandler.validateRequired(form)) {
+                Utils.showAlert('必須項目を入力してください', 'danger');
+                return;
+            }
+
+            const formData = FormHandler.getFormData(form);
+            
+            // 気温と湿度が空白の場合は現在の気象データを取得
+            if (!formData.temperature || !formData.humidity) {
+                try {
+                    const weatherData = await ApiService.get('/predict/weather');
+                    if (!formData.temperature) {
+                        formData.temperature = weatherData.temperature;
+                        document.getElementById('temperature').value = weatherData.temperature;
+                    }
+                    if (!formData.humidity) {
+                        formData.humidity = weatherData.humidity;
+                        document.getElementById('humidity').value = weatherData.humidity;
+                    }
+                } catch (error) {
+                    console.error('Failed to get weather data:', error);
+                    // デフォルト値を使用
+                    if (!formData.temperature) formData.temperature = 20.0;
+                    if (!formData.humidity) formData.humidity = 60.0;
+                }
+            }
+
+            try {
+                console.log('Sending prediction request with data:', formData);
+                const prediction = await ApiService.post('/predict/coffee', formData);
+                
+                displayPredictionResults(prediction, formData);
+                addToPredictionHistory(formData, 1);
+            } catch (error) {
+                console.error('Failed to get prediction:', error);
+                Utils.showAlert('予測の取得に失敗しました', 'danger');
+            }
+        }
+
+        function displayPredictionResults(prediction, conditions) {
+            const resultDiv = document.getElementById('predictionResult');
+            const contentDiv = document.getElementById('predictionContent');
+            
+            if (!prediction || prediction.error) {
+                contentDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h3>予測に失敗しました</h3>
+                        <p>エラー: ${prediction ? prediction.error : '不明なエラー'}</p>
+                    </div>
+                `;
+            } else {
+                contentDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <h3>予測完了！</h3>
+                        <p>コーヒー豆: ${conditions.bean_name} (${conditions.bean_origin})</p>
+                        <p>日付: ${conditions.date}, 天候: ${conditions.weather}</p>
+                        <p>気温: ${conditions.temperature}°C, 湿度: ${conditions.humidity}%</p>
+                    </div>
+                    <div class="grid grid-3">
+                        <div class="card">
+                            <h4>推奨グラム</h4>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.gram}g</p>
+                            <small>抽出量</small>
+                        </div>
+                        <div class="card">
+                            <h4>推奨メッシュ</h4>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.mesh}</p>
+                            <small>粉の細かさ</small>
+                        </div>
+                        <div class="card">
+                            <h4>抽出時間</h4>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.extraction_time}秒</p>
+                            <small>推奨抽出時間</small>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h4>信頼度</h4>
+                        <div class="progress">
+                            <div class="progress-bar" style="width: ${prediction.confidence * 100}%">
+                                ${(prediction.confidence * 100).toFixed(1)}%
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            resultDiv.style.display = 'block';
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function loadStatistics() {
+            // 統計情報を簡略化
+            document.getElementById('weatherStats').innerHTML = `
+                <div><strong>晴れ:</strong> 推奨</div>
+                <div><strong>曇り:</strong> 推奨</div>
+                <div><strong>雨:</strong> 注意</div>
+                <div><strong>雪:</strong> 注意</div>
+            `;
+            
+            document.getElementById('temperatureStats').innerHTML = `
+                <div><strong>推奨範囲:</strong> 15-25°C</div>
+                <div><strong>最適温度:</strong> 20°C</div>
+                <div><strong>湿度:</strong> 50-70%</div>
+            `;
+
+            document.getElementById('popularConditions').innerHTML = `
+                <div><strong>推奨グラム:</strong> 18-22g</div>
+                <div><strong>推奨メッシュ:</strong> 15-20</div>
+                <div><strong>抽出時間:</strong> 25-35秒</div>
+            `;
+        }
+
+        function addToPredictionHistory(conditions, resultCount) {
+            const history = {
+                timestamp: new Date().toISOString(),
+                conditions: conditions,
+                resultCount: resultCount
+            };
+            
+            predictionHistory.unshift(history);
+            if (predictionHistory.length > 10) {
+                predictionHistory = predictionHistory.slice(0, 10);
+            }
+            
+            loadPredictionHistory();
+        }
+
+        function loadPredictionHistory() {
+            const historyDiv = document.getElementById('predictionHistory');
+            
+            if (predictionHistory.length === 0) {
+                historyDiv.innerHTML = '<p>予測履歴がありません</p>';
+                return;
+            }
+
+            const historyHtml = predictionHistory.map(history => `
+                <div class="card" style="margin-bottom: 1rem;">
+                    <div class="grid grid-2">
+                        <div>
+                            <strong>コーヒー豆:</strong> ${history.conditions.bean_name} (${history.conditions.bean_origin})
+                        </div>
+                        <div>
+                            <strong>条件:</strong> ${history.conditions.weather}, ${history.conditions.temperature}°C
+                        </div>
+                    </div>
+                    <div>
+                        <strong>日付:</strong> ${history.conditions.date}
+                    </div>
+                    <small>${Utils.formatDate(history.timestamp)}</small>
+                </div>
+            `).join('');
+
+            historyDiv.innerHTML = historyHtml;
+        }
+    </script>
+</body>
+</html>

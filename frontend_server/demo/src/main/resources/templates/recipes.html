@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レシピ管理 - エスプレッソレシピ管理システム</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <!-- ヘッダー -->
+    <div th:replace="fragments/header :: siteHeader"></div>
+
+    <!-- メインコンテンツ -->
+    <div class="main-content">
+        <h1>レシピ管理</h1>
+        
+        <!-- 新規レシピ作成フォーム -->
+        <div class="card">
+            <h2>新規レシピ作成</h2>
+            <form id="recipeForm">
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="date">日付 *</label>
+                        <input type="date" id="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="weather">天候 *</label>
+                        <select id="weather" name="weather" class="form-control" required>
+                            <option value="">天候を選択</option>
+                            <option value="晴れ">晴れ</option>
+                            <option value="曇り">曇り</option>
+                            <option value="雨">雨</option>
+                            <option value="雪">雪</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="temperature">気温 (°C) *</label>
+                        <input type="number" id="temperature" name="temperature" class="form-control" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="humidity">湿度 (%) *</label>
+                        <input type="number" id="humidity" name="humidity" class="form-control" min="0" max="100" required>
+                    </div>
+                </div>
+                <div class="grid grid-3">
+                    <div class="form-group">
+                        <label for="gram">抽出量 (g) *</label>
+                        <input type="number" id="gram" name="gram" class="form-control" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="mesh">挽き具合 *</label>
+                        <input type="number" id="mesh" name="mesh" class="form-control" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="extraction_time">抽出時間 (秒) *</label>
+                        <input type="number" id="extraction_time" name="extraction_time" class="form-control" step="0.1" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="beanId">コーヒー豆 *</label>
+                    <select id="beanId" name="beanId" class="form-control" required>
+                        <option value="">コーヒー豆を選択してください</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">レシピ作成</button>
+            </form>
+        </div>
+
+        <!-- レシピ一覧 -->
+        <div class="card">
+            <h2>レシピ一覧</h2>
+            <div class="grid grid-2" style="margin-bottom: 1rem;">
+                <div>
+                    <label for="sortBy">並び順</label>
+                    <select id="sortBy" class="form-control">
+                        <option value="date">日付順</option>
+                        <option value="bean">コーヒー豆順</option>
+                        <option value="weather">天候順</option>
+                        <option value="temperature">気温順</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filterBean">コーヒー豆で絞り込み</label>
+                    <select id="filterBean" class="form-control">
+                        <option value="">すべての豆</option>
+                    </select>
+                </div>
+            </div>
+            <div id="recipeList" class="loading">読み込み中...</div>
+        </div>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+    <script>
+        let recipes = [];
+        let beans = [];
+        let filteredRecipes = [];
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await Promise.all([loadBeans(), loadRecipes()]);
+                setupEventListeners();
+                populateBeanSelect();
+                setDefaultDate();
+            } catch (error) {
+                console.error('Recipe page loading failed:', error);
+                Utils.showAlert('レシピページの読み込みに失敗しました', 'danger');
+            }
+        });
+
+        function setupEventListeners() {
+            // フォーム送信イベント
+            const recipeForm = document.getElementById('recipeForm');
+            recipeForm.addEventListener('submit', handleRecipeSubmit);
+
+            // 並び順とフィルターのイベント
+            const sortBy = document.getElementById('sortBy');
+            const filterBean = document.getElementById('filterBean');
+            sortBy.addEventListener('change', updateRecipeDisplay);
+            filterBean.addEventListener('change', updateRecipeDisplay);
+        }
+
+        function setDefaultDate() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('date').value = today;
+        }
+
+        async function loadBeans() {
+            try {
+                beans = await ApiService.get('/beans');
+            } catch (error) {
+                console.error('Failed to load beans:', error);
+                Utils.showAlert('コーヒー豆の読み込みに失敗しました', 'danger');
+            }
+        }
+
+        function populateBeanSelect() {
+            // コーヒー豆選択（ログインユーザーの豆のみ）
+            const beanSelect = document.getElementById('beanId');
+            const filterBeanSelect = document.getElementById('filterBean');
+            
+            beanSelect.innerHTML = '<option value="">コーヒー豆を選択してください</option>';
+            filterBeanSelect.innerHTML = '<option value="">すべての豆</option>';
+            
+            beans.forEach(bean => {
+                // レシピ作成用の選択肢
+                const option = document.createElement('option');
+                option.value = bean.id;
+                option.textContent = `${bean.name} (${bean.fromLocation})`;
+                beanSelect.appendChild(option);
+                
+                // フィルター用の選択肢
+                const filterOption = document.createElement('option');
+                filterOption.value = bean.id;
+                filterOption.textContent = bean.name;
+                filterBeanSelect.appendChild(filterOption);
+            });
+        }
+
+        async function loadRecipes() {
+            try {
+                recipes = await ApiService.get('/recipes');
+                filteredRecipes = [...recipes];
+                updateRecipeDisplay();
+            } catch (error) {
+                console.error('Failed to load recipes:', error);
+                Utils.showAlert('レシピの読み込みに失敗しました', 'danger');
+            }
+        }
+
+        function updateRecipeDisplay() {
+            const sortBy = document.getElementById('sortBy').value;
+            const filterBeanId = document.getElementById('filterBean').value;
+            
+            // フィルタリング
+            let recipesToShow = recipes;
+            if (filterBeanId) {
+                recipesToShow = recipes.filter(recipe => 
+                    recipe.bean && recipe.bean.id == filterBeanId
+                );
+            }
+            
+            // ソート
+            recipesToShow.sort((a, b) => {
+                switch (sortBy) {
+                    case 'date':
+                        return new Date(b.date) - new Date(a.date);
+                    case 'bean':
+                        if (!a.bean || !b.bean) return 0;
+                        return a.bean.name.localeCompare(b.bean.name);
+                    case 'weather':
+                        return a.weather.localeCompare(b.weather);
+                    case 'temperature':
+                        return b.temperature - a.temperature;
+                    default:
+                        return 0;
+                }
+            });
+            
+            filteredRecipes = recipesToShow;
+            displayRecipes();
+        }
+
+        function displayRecipes() {
+            const recipeListElement = document.getElementById('recipeList');
+            
+            if (filteredRecipes.length === 0) {
+                recipeListElement.innerHTML = '<p>レシピが登録されていません</p>';
+                return;
+            }
+
+            const columns = [
+                { key: 'date', header: '日付', render: (value) => Utils.formatDate(value) },
+                { key: 'weather', header: '天候' },
+                { key: 'temperature', header: '気温', render: (value) => `${value}°C` },
+                { key: 'humidity', header: '湿度', render: (value) => `${value}%` },
+                { key: 'gram', header: '抽出量', render: (value) => `${value}g` },
+                { key: 'mesh', header: '挽き具合' },
+                { key: 'extraction_time', header: '抽出時間', render: (value) => `${value}秒` },
+                { key: 'bean', header: 'コーヒー豆', render: (value) => value ? `${value.name} (${value.fromLocation})` : '不明' },
+                { 
+                    key: 'id', 
+                    header: '操作',
+                    render: (value) => `
+                        <button onclick="editRecipe(${value})" class="btn btn-secondary">編集</button>
+                        <button onclick="deleteRecipe(${value})" class="btn btn-danger">削除</button>
+                    `
+                }
+            ];
+
+            const table = DataTable.createTable(filteredRecipes, columns);
+            recipeListElement.innerHTML = table;
+        }
+
+        async function handleRecipeSubmit(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            
+            // バリデーション
+            if (!FormHandler.validateRequired(form)) {
+                Utils.showAlert('必須項目を入力してください', 'danger');
+                return;
+            }
+
+            const formData = FormHandler.getFormData(form);
+            
+            // 数値のバリデーション
+            const temperature = parseFloat(formData.temperature);
+            const humidity = parseInt(formData.humidity);
+            const gram = parseFloat(formData.gram);
+            const mesh = parseFloat(formData.mesh);
+            const extraction_time = parseFloat(formData.extraction_time);
+
+            if (isNaN(temperature) || isNaN(humidity) || isNaN(gram) || isNaN(mesh) || isNaN(extraction_time)) {
+                Utils.showAlert('数値項目に正しい値を入力してください', 'danger');
+                return;
+            }
+
+            const recipeData = {
+                date: formData.date,
+                weather: formData.weather,
+                temperature: temperature,
+                humidity: humidity,
+                gram: gram,
+                mesh: mesh,
+                extraction_time: extraction_time,
+                bean: { id: parseInt(formData.beanId) }
+            };
+
+            try {
+                await ApiService.post('/recipes', recipeData);
+                Utils.showAlert('レシピが正常に作成されました', 'success');
+                FormHandler.clearForm(form);
+                setDefaultDate();
+                await loadRecipes(); // 一覧を更新
+            } catch (error) {
+                console.error('Failed to create recipe:', error);
+                Utils.showAlert('レシピの作成に失敗しました', 'danger');
+            }
+        }
+
+        async function editRecipe(recipeId) {
+            const recipe = recipes.find(r => r.id === recipeId);
+            if (!recipe) {
+                Utils.showAlert('レシピが見つかりません', 'danger');
+                return;
+            }
+
+            // 編集フォームをモーダルで表示
+            const modalContent = `
+                <form id="editRecipeForm">
+                    <input type="hidden" name="id" value="${recipe.id}">
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label for="editDate">日付 *</label>
+                            <input type="date" id="editDate" name="date" class="form-control" value="${recipe.date}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editWeather">天候 *</label>
+                            <select id="editWeather" name="weather" class="form-control" required>
+                                <option value="晴れ" ${recipe.weather === '晴れ' ? 'selected' : ''}>晴れ</option>
+                                <option value="曇り" ${recipe.weather === '曇り' ? 'selected' : ''}>曇り</option>
+                                <option value="雨" ${recipe.weather === '雨' ? 'selected' : ''}>雨</option>
+                                <option value="雪" ${recipe.weather === '雪' ? 'selected' : ''}>雪</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label for="editTemperature">気温 (°C) *</label>
+                            <input type="number" id="editTemperature" name="temperature" class="form-control" step="0.1" value="${recipe.temperature}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editHumidity">湿度 (%) *</label>
+                            <input type="number" id="editHumidity" name="humidity" class="form-control" min="0" max="100" value="${recipe.humidity}" required>
+                        </div>
+                    </div>
+                    <div class="grid grid-3">
+                        <div class="form-group">
+                            <label for="editGram">抽出量 (g) *</label>
+                            <input type="number" id="editGram" name="gram" class="form-control" step="0.1" value="${recipe.gram}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editMesh">挽き具合 *</label>
+                            <input type="number" id="editMesh" name="mesh" class="form-control" step="0.1" value="${recipe.mesh}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editExtractionTime">抽出時間 (秒) *</label>
+                            <input type="number" id="editExtractionTime" name="extraction_time" class="form-control" step="0.1" value="${recipe.extraction_time}" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">更新</button>
+                </form>
+            `;
+
+            Modal.show('レシピ編集', modalContent);
+
+            // 編集フォームのイベントリスナー
+            const editForm = document.getElementById('editRecipeForm');
+            editForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                
+                const formData = FormHandler.getFormData(event.target);
+                
+                if (!FormHandler.validateRequired(event.target)) {
+                    Utils.showAlert('必須項目を入力してください', 'danger');
+                    return;
+                }
+
+                const recipeData = {
+                    date: formData.date,
+                    weather: formData.weather,
+                    temperature: parseFloat(formData.temperature),
+                    humidity: parseInt(formData.humidity),
+                    gram: parseFloat(formData.gram),
+                    mesh: parseFloat(formData.mesh),
+                    extraction_time: parseFloat(formData.extraction_time)
+                };
+
+                try {
+                    await ApiService.put(`/recipes/${recipe.id}`, recipeData);
+                    Utils.showAlert('レシピが正常に更新されました', 'success');
+                    Modal.hide(document.querySelector('.modal'));
+                    await loadRecipes(); // 一覧を更新
+                } catch (error) {
+                    console.error('Failed to update recipe:', error);
+                    Utils.showAlert('レシピの更新に失敗しました', 'danger');
+                }
+            });
+        }
+
+        async function deleteRecipe(recipeId) {
+            if (!confirm('このレシピを削除しますか？')) {
+                return;
+            }
+
+            try {
+                await ApiService.delete(`/recipes/${recipeId}`);
+                Utils.showAlert('レシピが正常に削除されました', 'success');
+                await loadRecipes(); // 一覧を更新
+            } catch (error) {
+                console.error('Failed to delete recipe:', error);
+                Utils.showAlert('レシピの削除に失敗しました', 'danger');
+            }
+        }
+    </script>
+</body>
+</html>

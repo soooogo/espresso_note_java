@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>エスプレッソレシピ管理システム</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <!-- ヘッダー -->
+    <div th:replace="fragments/header :: siteHeader"></div>
+
+    <!-- メインコンテンツ -->
+    <div class="main-content">
+        <h1>エスプレッソレシピ管理システム</h1>
+        <p class="lead">コーヒー豆とレシピを管理し、最適なエスプレッソを抽出しましょう</p>
+
+        <!-- 統計情報 -->
+        <div class="grid grid-3">
+            <div class="card">
+                <h3>ユーザー数</h3>
+                <div id="userCount" class="loading">読み込み中...</div>
+            </div>
+            <div class="card">
+                <h3>コーヒー豆数</h3>
+                <div id="beanCount" class="loading">読み込み中...</div>
+            </div>
+            <div class="card">
+                <h3>レシピ数</h3>
+                <div id="recipeCount" class="loading">読み込み中...</div>
+            </div>
+        </div>
+
+        <!-- クイックアクション -->
+        <div class="card">
+            <h2>クイックアクション</h2>
+            <div class="grid grid-2">
+                <div>
+                    <h3>新規作成</h3>
+                    <a th:href="@{/beans}" class="btn btn-primary">コーヒー豆登録</a>
+                    <a th:href="@{/recipes}" class="btn btn-primary">レシピ作成</a>
+                </div>
+                <div>
+                    <h3>レシピ予測</h3>
+                    <a th:href="@{/predict}" class="btn btn-success">天候ベース予測</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 最近のレシピ -->
+        <div class="card">
+            <h2>最近のレシピ</h2>
+            <div id="recentRecipes" class="loading">読み込み中...</div>
+        </div>
+
+        <!-- 人気のコーヒー豆 -->
+        <div class="card">
+            <h2>人気のコーヒー豆</h2>
+            <div id="popularBeans" class="loading">読み込み中...</div>
+        </div>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+    <script>
+        // ダッシュボードの初期化
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await loadDashboardData();
+            } catch (error) {
+                console.error('Dashboard loading failed:', error);
+                Utils.showAlert('ダッシュボードの読み込みに失敗しました', 'danger');
+            }
+        });
+
+        async function loadDashboardData() {
+            // 統計情報の読み込み
+            await Promise.all([
+                loadUserCount(),
+                loadBeanCount(),
+                loadRecipeCount(),
+                loadRecentRecipes(),
+                loadPopularBeans()
+            ]);
+        }
+
+        async function loadUserCount() {
+            try {
+                // 現在のユーザー情報を取得（ユーザー数は常に1）
+                document.getElementById('userCount').textContent = '1';
+            } catch (error) {
+                document.getElementById('userCount').textContent = 'エラー';
+            }
+        }
+
+        async function loadBeanCount() {
+            try {
+                const beans = await ApiService.get('/beans');
+                document.getElementById('beanCount').textContent = beans.length;
+            } catch (error) {
+                document.getElementById('beanCount').textContent = 'エラー';
+            }
+        }
+
+        async function loadRecipeCount() {
+            try {
+                const recipes = await ApiService.get('/recipes');
+                document.getElementById('recipeCount').textContent = recipes.length;
+            } catch (error) {
+                document.getElementById('recipeCount').textContent = 'エラー';
+            }
+        }
+
+        async function loadRecentRecipes() {
+            try {
+                const recipes = await ApiService.get('/recipes');
+                const recentRecipes = recipes.slice(0, 5); // 最新5件
+
+                if (recentRecipes.length === 0) {
+                    document.getElementById('recentRecipes').innerHTML = '<p>レシピがありません</p>';
+                    return;
+                }
+
+                const columns = [
+                    { key: 'date', header: '日付', render: (value) => Utils.formatDate(value) },
+                    { key: 'weather', header: '天候' },
+                    { key: 'temperature', header: '気温', render: (value) => `${value}°C` },
+                    { key: 'gram', header: '抽出量', render: (value) => `${value}g` },
+                    { key: 'mesh', header: '挽き具合' },
+                    { key: 'extraction_time', header: '抽出時間', render: (value) => `${value}秒` }
+                ];
+
+                const table = DataTable.createTable(recentRecipes, columns);
+                document.getElementById('recentRecipes').innerHTML = table;
+            } catch (error) {
+                document.getElementById('recentRecipes').innerHTML = '<p>読み込みエラー</p>';
+            }
+        }
+
+        async function loadPopularBeans() {
+            try {
+                const beans = await ApiService.get('/beans');
+                const recipes = await ApiService.get('/recipes');
+
+                // 豆ごとのレシピ数をカウント
+                const beanUsage = {};
+                recipes.forEach(recipe => {
+                    const beanId = recipe.bean.id;
+                    beanUsage[beanId] = (beanUsage[beanId] || 0) + 1;
+                });
+
+                // 使用頻度順にソート
+                const sortedBeans = beans
+                    .map(bean => ({
+                        ...bean,
+                        usageCount: beanUsage[bean.id] || 0
+                    }))
+                    .sort((a, b) => b.usageCount - a.usageCount)
+                    .slice(0, 5);
+
+                if (sortedBeans.length === 0) {
+                    document.getElementById('popularBeans').innerHTML = '<p>コーヒー豆がありません</p>';
+                    return;
+                }
+
+                const columns = [
+                    { key: 'name', header: '豆の名前' },
+                    { key: 'fromLocation', header: '産地' },
+                    { key: 'usageCount', header: '使用回数', render: (value) => `${value}回` }
+                ];
+
+                const table = DataTable.createTable(sortedBeans, columns);
+                document.getElementById('popularBeans').innerHTML = table;
+            } catch (error) {
+                document.getElementById('popularBeans').innerHTML = '<p>読み込みエラー</p>';
+            }
+        }
+    </script>
+</body>
+</html>

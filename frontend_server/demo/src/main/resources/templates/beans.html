@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>コーヒー豆管理 - エスプレッソレシピ管理システム</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <!-- ヘッダー -->
+    <div th:replace="fragments/header :: siteHeader"></div>
+
+    <!-- メインコンテンツ -->
+    <div class="main-content">
+        <h1>コーヒー豆管理</h1>
+        
+        <!-- コーヒー豆一覧 -->
+        <div class="card">
+            <h2>コーヒー豆一覧</h2>
+            <div id="beanList" class="loading">読み込み中...</div>
+        </div>
+
+        <!-- 新規コーヒー豆登録フォーム -->
+        <div class="card">
+            <h2>新規コーヒー豆登録</h2>
+            <form id="beanForm">
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label for="name">豆の名前 * (30文字以内)</label>
+                        <input type="text" id="name" name="name" class="form-control" maxlength="50" required>
+                        <small class="form-text">30文字以内で入力してください</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="fromLocation">産地 * (20文字以内)</label>
+                        <input type="text" id="fromLocation" name="fromLocation" class="form-control" maxlength="50" required>
+                        <small class="form-text">20文字以内で入力してください</small>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">コーヒー豆登録</button>
+            </form>
+        </div>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+    <script>
+        let beans = [];
+
+        // ページ読み込み時の初期化
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await loadBeans();
+                setupEventListeners();
+            } catch (error) {
+                console.error('Bean page loading failed:', error);
+                Utils.showAlert('コーヒー豆ページの読み込みに失敗しました', 'danger');
+            }
+        });
+
+        function setupEventListeners() {
+            // フォーム送信イベント
+            const beanForm = document.getElementById('beanForm');
+            beanForm.addEventListener('submit', handleBeanSubmit);
+            
+            // 文字数制限のリアルタイムチェック
+            const nameInput = document.getElementById('name');
+            const locationInput = document.getElementById('fromLocation');
+            
+            nameInput.addEventListener('input', function() {
+                validateFieldLength(this, 50, '豆の名前');
+            });
+            
+            locationInput.addEventListener('input', function() {
+                validateFieldLength(this, 50, '産地');
+            });
+        }
+
+        function validateFieldLength(input, maxLength, fieldName) {
+            const value = input.value;
+            if (value.length > maxLength) {
+                input.style.borderColor = '#dc3545';
+                Utils.showAlert(`${fieldName}は${maxLength}文字以内で入力してください`, 'danger');
+                return false;
+            } else {
+                input.style.borderColor = '#e1e5e9';
+                return true;
+            }
+        }
+
+        async function loadBeans() {
+            try {
+                beans = await ApiService.get('/beans');
+                displayBeans();
+            } catch (error) {
+                console.error('Failed to load beans:', error);
+                Utils.showAlert('コーヒー豆の読み込みに失敗しました', 'danger');
+            }
+        }
+
+        function displayBeans() {
+            const beanListElement = document.getElementById('beanList');
+            
+            if (beans.length === 0) {
+                beanListElement.innerHTML = '<p>コーヒー豆が登録されていません</p>';
+                return;
+            }
+
+            const columns = [
+                { key: 'id', header: 'ID' },
+                { key: 'name', header: '豆の名前' },
+                { key: 'fromLocation', header: '産地' },
+                { 
+                    key: 'id', 
+                    header: '操作',
+                    render: (value) => `
+                        <button onclick="editBean(${value})" class="btn btn-secondary">編集</button>
+                        <button onclick="deleteBean(${value})" class="btn btn-danger">削除</button>
+                        <button onclick="viewRecipes(${value})" class="btn btn-success">レシピ</button>
+                    `
+                }
+            ];
+
+            const table = DataTable.createTable(beans, columns);
+            beanListElement.innerHTML = table;
+        }
+
+        async function handleBeanSubmit(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            
+            // バリデーション
+            if (!FormHandler.validateRequired(form)) {
+                Utils.showAlert('必須項目を入力してください', 'danger');
+                return;
+            }
+
+            const formData = FormHandler.getFormData(form);
+            
+            // 文字数制限のバリデーション
+            if (formData.name.length > 50) {
+                Utils.showAlert('豆の名前は50文字以内で入力してください', 'danger');
+                return;
+            }
+            if (formData.fromLocation.length > 50) {
+                Utils.showAlert('産地は50文字以内で入力してください', 'danger');
+                return;
+            }
+            
+            // ユーザー選択は不要（ログインユーザーが自動的に設定される）
+            const beanData = {
+                name: formData.name,
+                fromLocation: formData.fromLocation
+            };
+
+            try {
+                await ApiService.post('/beans', beanData);
+                Utils.showAlert('コーヒー豆が正常に登録されました', 'success');
+                FormHandler.clearForm(form);
+                await loadBeans(); // 一覧を更新
+            } catch (error) {
+                console.error('Failed to create bean:', error);
+                Utils.showAlert('コーヒー豆の登録に失敗しました', 'danger');
+            }
+        }
+
+        async function editBean(beanId) {
+            const bean = beans.find(b => b.id === beanId);
+            if (!bean) {
+                Utils.showAlert('コーヒー豆が見つかりません', 'danger');
+                return;
+            }
+
+            // 編集フォームをモーダルで表示
+            const modalContent = `
+                <form id="editBeanForm">
+                    <input type="hidden" name="id" value="${bean.id}">
+                    <div class="form-group">
+                        <label for="editName">豆の名前 * (50文字以内)</label>
+                        <input type="text" id="editName" name="name" class="form-control" value="${bean.name}" maxlength="50" required>
+                        <small class="form-text">50文字以内で入力してください</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="editFromLocation">産地 * (50文字以内)</label>
+                        <input type="text" id="editFromLocation" name="fromLocation" class="form-control" value="${bean.fromLocation}" maxlength="50" required>
+                        <small class="form-text">50文字以内で入力してください</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">更新</button>
+                </form>
+            `;
+
+            Modal.show('コーヒー豆編集', modalContent);
+
+            // 編集フォームのイベントリスナー
+            const editForm = document.getElementById('editBeanForm');
+            editForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                
+                const formData = FormHandler.getFormData(event.target);
+                
+                if (!FormHandler.validateRequired(event.target)) {
+                    Utils.showAlert('必須項目を入力してください', 'danger');
+                    return;
+                }
+
+                // 文字数制限のバリデーション
+                if (formData.name.length > 50) {
+                    Utils.showAlert('豆の名前は50文字以内で入力してください', 'danger');
+                    return;
+                }
+                if (formData.fromLocation.length > 50) {
+                    Utils.showAlert('産地は50文字以内で入力してください', 'danger');
+                    return;
+                }
+
+                try {
+                    await ApiService.put(`/beans/${bean.id}`, formData);
+                    Utils.showAlert('コーヒー豆が正常に更新されました', 'success');
+                    Modal.hide(document.querySelector('.modal'));
+                    await loadBeans(); // 一覧を更新
+                } catch (error) {
+                    console.error('Failed to update bean:', error);
+                    Utils.showAlert('コーヒー豆の更新に失敗しました', 'danger');
+                }
+            });
+        }
+
+        async function deleteBean(beanId) {
+            if (!confirm('このコーヒー豆を削除しますか？関連するレシピも削除されます。')) {
+                return;
+            }
+
+            try {
+                await ApiService.delete(`/beans/${beanId}`);
+                Utils.showAlert('コーヒー豆が正常に削除されました', 'success');
+                await loadBeans(); // 一覧を更新
+            } catch (error) {
+                console.error('Failed to delete bean:', error);
+                Utils.showAlert('コーヒー豆の削除に失敗しました', 'danger');
+            }
+        }
+
+        async function viewRecipes(beanId) {
+            try {
+                const recipes = await ApiService.get(`/recipes/bean/${beanId}`);
+                const bean = beans.find(b => b.id === beanId);
+                
+                if (recipes.length === 0) {
+                    Modal.show('レシピ一覧', `<p>このコーヒー豆のレシピはありません</p>`);
+                    return;
+                }
+
+                const columns = [
+                    { key: 'date', header: '日付', render: (value) => Utils.formatDate(value) },
+                    { key: 'weather', header: '天候' },
+                    { key: 'temperature', header: '気温', render: (value) => `${value}°C` },
+                    { key: 'humidity', header: '湿度', render: (value) => `${value}%` },
+                    { key: 'gram', header: '抽出量', render: (value) => `${value}g` },
+                    { key: 'mesh', header: '挽き具合' },
+                    { key: 'extraction_time', header: '抽出時間', render: (value) => `${value}秒` }
+                ];
+
+                const table = DataTable.createTable(recipes, columns);
+                const modalContent = `
+                    <h3>${bean.name} のレシピ一覧</h3>
+                    ${table}
+                `;
+
+                Modal.show('レシピ一覧', modalContent);
+            } catch (error) {
+                console.error('Failed to load recipes:', error);
+                Utils.showAlert('レシピの読み込みに失敗しました', 'danger');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<header class="header" xmlns:th="http://www.thymeleaf.org" th:fragment="siteHeader">
+    <nav class="nav">
+        <div class="logo"><a th:href="@{/}">☕ エスプレッソレシピ管理</a></div>
+        <ul class="nav-links">
+            <li><a th:href="@{/}">ホーム</a></li>
+            <li><a th:href="@{/beans}">コーヒー豆管理</a></li>
+            <li><a th:href="@{/recipes}">レシピ管理</a></li>
+            <li><a th:href="@{/predict}">レシピ予測</a></li>
+            <li><a th:href="@{/logout}">ログアウト</a></li>
+        </ul>
+    </nav>
+</header>
