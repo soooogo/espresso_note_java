@@ -1,10 +1,13 @@
-package com.example.demo;
+package com.example.demo.service;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
+
+import com.example.demo.entity.User;
+import com.example.demo.repository.UserRepository;
 
 @Component
 public class SecurityUtils {

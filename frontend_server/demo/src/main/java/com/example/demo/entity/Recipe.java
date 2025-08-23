@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.demo.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDate;
@@ -34,6 +34,8 @@ public class Recipe {
     @Column(nullable = false)
     private Float extraction_time;
     
+    private Float days_passed;
+    
     // Default constructor
     public Recipe() {}
     
@@ -48,6 +50,21 @@ public class Recipe {
         this.gram = gram;
         this.mesh = mesh;
         this.extraction_time = extraction_time;
+        this.days_passed = 15.0f; // デフォルト値
+    }
+    
+    // Constructor with days_passed
+    public Recipe(Bean bean, LocalDate date, String weather, Float temperature, 
+                  Integer humidity, Float gram, Float mesh, Float extraction_time, Float days_passed) {
+        this.bean = bean;
+        this.date = date;
+        this.weather = weather;
+        this.temperature = temperature;
+        this.humidity = humidity;
+        this.gram = gram;
+        this.mesh = mesh;
+        this.extraction_time = extraction_time;
+        this.days_passed = days_passed;
     }
     
     // Getters and Setters
@@ -123,6 +140,14 @@ public class Recipe {
         this.extraction_time = extraction_time;
     }
     
+    public Float getDays_passed() {
+        return days_passed;
+    }
+    
+    public void setDays_passed(Float days_passed) {
+        this.days_passed = days_passed;
+    }
+    
     @Override
     public String toString() {
         return "Recipe{" +
@@ -135,6 +160,7 @@ public class Recipe {
                 ", gram=" + gram +
                 ", mesh=" + mesh +
                 ", extraction_time=" + extraction_time +
+                ", days_passed=" + days_passed +
                 '}';
     }
 }

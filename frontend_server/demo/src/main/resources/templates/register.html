@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新規登録 - エスプレッソレシピ管理</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <div class="main-content" style="max-width: 500px; margin-top: 5vh;">
+        <h1 style="text-align:center; margin-bottom: 1rem;">新規登録</h1>
+        <div class="card">
+            <form id="registerForm">
+                <div class="form-group">
+                    <label for="name">お名前 *</label>
+                    <input type="text" id="name" name="name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="email">メールアドレス *</label>
+                    <input type="email" id="email" name="email" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">パスワード *</label>
+                    <input type="password" id="password" name="password" class="form-control" required minlength="6">
+                    <small>6文字以上で入力してください</small>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">パスワード（確認） *</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%">登録</button>
+            </form>
+        </div>
+
+        <div style="text-align:center; margin-top:1rem;">
+            <p>既にアカウントをお持ちの方は <a href="/login">ログイン</a></p>
+        </div>
+    </div>
+
+    <script th:src="@{/js/app.js}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('registerForm');
+            
+            form.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                
+                // バリデーション
+                const password = document.getElementById('password').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+                
+                if (password !== confirmPassword) {
+                    Utils.showAlert('パスワードが一致しません', 'danger');
+                    return;
+                }
+                
+                if (password.length < 6) {
+                    Utils.showAlert('パスワードは6文字以上で入力してください', 'danger');
+                    return;
+                }
+                
+                // フォームデータを取得
+                const formData = {
+                    name: document.getElementById('name').value,
+                    email: document.getElementById('email').value,
+                    password: password,
+                    role: 'ROLE_USER'
+                };
+                
+                console.log('Sending registration data:', formData);
+                
+                try {
+                    const response = await ApiService.post('/users/register', formData);
+                    Utils.showAlert('登録が完了しました。ログインしてください。', 'success');
+                    
+                    // ログインページにリダイレクト
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                    
+                } catch (error) {
+                    console.error('Registration failed:', error);
+                    let errorMessage = '登録に失敗しました';
+                    
+                    if (error.response && error.response.data) {
+                        errorMessage = error.response.data;
+                    } else if (error.message) {
+                        errorMessage = error.message;
+                    }
+                    
+                    Utils.showAlert(errorMessage, 'danger');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

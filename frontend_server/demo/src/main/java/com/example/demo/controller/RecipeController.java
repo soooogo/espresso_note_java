@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.demo.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -8,6 +8,14 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+
+import com.example.demo.entity.User;
+import com.example.demo.entity.Bean;
+import com.example.demo.entity.Recipe;
+import com.example.demo.repository.UserRepository;
+import com.example.demo.repository.BeanRepository;
+import com.example.demo.repository.RecipeRepository;
+import com.example.demo.service.SecurityUtils;
 
 @RestController
 @RequestMapping("/api/recipes")

@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.demo.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -7,6 +7,9 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+
+import com.example.demo.entity.Recipe;
+import com.example.demo.entity.Bean;
 
 @Repository
 public interface RecipeRepository extends JpaRepository<Recipe, Integer> {

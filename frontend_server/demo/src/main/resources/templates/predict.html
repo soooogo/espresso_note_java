@@ -27,10 +27,8 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="bean_origin">産地 *</label>
-                        <select id="bean_origin" name="bean_origin" class="form-control" required>
-                            <option value="">産地を選択</option>
-                        </select>
+                        <label for="days_passed">経過日数 *</label>
+                        <input type="number" id="days_passed" name="days_passed" class="form-control" step="1" required>
                     </div>
                 </div>
                 <div class="grid grid-2">
@@ -51,14 +49,12 @@
                 </div>
                 <div class="grid grid-2">
                     <div class="form-group">
-                        <label for="temperature">気温 (°C)</label>
-                        <input type="number" id="temperature" name="temperature" class="form-control" step="0.1" placeholder="自動取得">
-                        <small>空白の場合は現在の気温を自動取得します</small>
+                        <label for="temperature">気温 (°C) *</label>
+                        <input type="number" id="temperature" name="temperature" class="form-control" step="0.1" required>
                     </div>
                     <div class="form-group">
-                        <label for="humidity">湿度 (%)</label>
-                        <input type="number" id="humidity" name="humidity" class="form-control" step="1" placeholder="自動取得">
-                        <small>空白の場合は現在の湿度を自動取得します</small>
+                        <label for="humidity">湿度 (%) *</label>
+                        <input type="number" id="humidity" name="humidity" class="form-control" step="1" required>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">予測実行</button>
@@ -69,6 +65,25 @@
         <div class="card" id="predictionResult" style="display: none;">
             <h2>予測結果</h2>
             <div id="predictionContent"></div>
+        </div>
+
+        <!-- 時系列グラフ -->
+        <div class="card" id="historyGraph" style="display: none;">
+            <h2>過去1年のレシピ履歴</h2>
+            <div class="grid grid-2">
+                <div>
+                    <h3>抽出時間の推移</h3>
+                    <canvas id="extractionTimeChart" width="400" height="200"></canvas>
+                </div>
+                <div>
+                    <h3>グラム数の推移</h3>
+                    <canvas id="gramChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+            <div style="margin-top: 20px;">
+                <h3>メッシュ数の推移</h3>
+                <canvas id="meshChart" width="800" height="200"></canvas>
+            </div>
         </div>
 
         <!-- 統計情報 -->
@@ -94,9 +109,11 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script th:src="@{/js/app.js}"></script>
     <script>
         let predictionHistory = [];
+        let historyCharts = {};
 
         // ページ読み込み時の初期化
         document.addEventListener('DOMContentLoaded', async function() {
@@ -116,24 +133,6 @@
             // フォーム送信イベント
             const predictForm = document.getElementById('predictForm');
             predictForm.addEventListener('submit', handlePredictionSubmit);
-            
-            // コーヒー豆選択時の産地自動設定
-            const beanSelect = document.getElementById('bean_name');
-            const originSelect = document.getElementById('bean_origin');
-            
-            beanSelect.addEventListener('change', function() {
-                const selectedBean = this.value;
-                if (selectedBean) {
-                    // 選択された豆の産地を自動設定
-                    const option = this.options[this.selectedIndex];
-                    const beanText = option.textContent;
-                    const originMatch = beanText.match(/\(([^)]+)\)/);
-                    if (originMatch) {
-                        const origin = originMatch[1];
-                        originSelect.value = origin;
-                    }
-                }
-            });
         }
 
         function setDefaultDate() {
@@ -149,10 +148,8 @@
                 } else {
                     // 豆が登録されていない場合
                     const beanSelect = document.getElementById('bean_name');
-                    const originSelect = document.getElementById('bean_origin');
                     
                     beanSelect.innerHTML = '<option value="">コーヒー豆が登録されていません</option>';
-                    originSelect.innerHTML = '<option value="">産地を選択</option>';
                     
                     Utils.showAlert('登録されているコーヒー豆がありません。先に豆を登録してください。', 'warning');
                 }
@@ -164,11 +161,9 @@
 
         function populateBeanSelect(beans) {
             const beanSelect = document.getElementById('bean_name');
-            const originSelect = document.getElementById('bean_origin');
             
             // 既存のオプションをクリア（最初の「選択してください」以外）
             beanSelect.innerHTML = '<option value="">コーヒー豆を選択</option>';
-            originSelect.innerHTML = '<option value="">産地を選択</option>';
             
             // 豆の選択肢を追加
             beans.forEach(bean => {
@@ -176,15 +171,6 @@
                 option.value = bean.name;
                 option.textContent = `${bean.name} (${bean.origin})`;
                 beanSelect.appendChild(option);
-            });
-            
-            // 産地の選択肢を追加（重複を除く）
-            const origins = [...new Set(beans.map(bean => bean.origin))];
-            origins.forEach(origin => {
-                const option = document.createElement('option');
-                option.value = origin;
-                option.textContent = origin;
-                originSelect.appendChild(option);
             });
         }
 
@@ -201,25 +187,7 @@
 
             const formData = FormHandler.getFormData(form);
             
-            // 気温と湿度が空白の場合は現在の気象データを取得
-            if (!formData.temperature || !formData.humidity) {
-                try {
-                    const weatherData = await ApiService.get('/predict/weather');
-                    if (!formData.temperature) {
-                        formData.temperature = weatherData.temperature;
-                        document.getElementById('temperature').value = weatherData.temperature;
-                    }
-                    if (!formData.humidity) {
-                        formData.humidity = weatherData.humidity;
-                        document.getElementById('humidity').value = weatherData.humidity;
-                    }
-                } catch (error) {
-                    console.error('Failed to get weather data:', error);
-                    // デフォルト値を使用
-                    if (!formData.temperature) formData.temperature = 20.0;
-                    if (!formData.humidity) formData.humidity = 60.0;
-                }
-            }
+
 
             try {
                 console.log('Sending prediction request with data:', formData);
@@ -227,6 +195,9 @@
                 
                 displayPredictionResults(prediction, formData);
                 addToPredictionHistory(formData, 1);
+                
+                // 過去のレシピ履歴を取得してグラフを表示
+                await loadAndDisplayHistoryGraph(formData.bean_name);
             } catch (error) {
                 console.error('Failed to get prediction:', error);
                 Utils.showAlert('予測の取得に失敗しました', 'danger');
@@ -248,24 +219,24 @@
                 contentDiv.innerHTML = `
                     <div class="alert alert-success">
                         <h3>予測完了！</h3>
-                        <p>コーヒー豆: ${conditions.bean_name} (${conditions.bean_origin})</p>
+                        <p>コーヒー豆: ${conditions.bean_name}</p>
                         <p>日付: ${conditions.date}, 天候: ${conditions.weather}</p>
-                        <p>気温: ${conditions.temperature}°C, 湿度: ${conditions.humidity}%</p>
+                        <p>気温: ${conditions.temperature}°C, 湿度: ${conditions.humidity}%, 経過日数: ${conditions.days_passed}日</p>
                     </div>
                     <div class="grid grid-3">
                         <div class="card">
                             <h4>推奨グラム</h4>
-                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.gram}g</p>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.gram.toFixed(1)}g</p>
                             <small>抽出量</small>
                         </div>
                         <div class="card">
                             <h4>推奨メッシュ</h4>
-                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.mesh}</p>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.mesh.toFixed(1)}</p>
                             <small>粉の細かさ</small>
                         </div>
                         <div class="card">
                             <h4>抽出時間</h4>
-                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.extraction_time}秒</p>
+                            <p class="text-center" style="font-size: 2rem; font-weight: bold; color: #667eea;">${prediction.extraction_time.toFixed(1)}秒</p>
                             <small>推奨抽出時間</small>
                         </div>
                     </div>
@@ -282,6 +253,201 @@
             
             resultDiv.style.display = 'block';
             resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function loadAndDisplayHistoryGraph(beanName) {
+            try {
+                // 過去のレシピ履歴を取得
+                const history = await ApiService.get(`/predict/bean-history?bean_name=${encodeURIComponent(beanName)}`);
+                
+                if (history && history.length > 0) {
+                    displayHistoryGraphs(history);
+                } else {
+                    console.log('No history data available for this bean');
+                }
+            } catch (error) {
+                console.error('Failed to load history data:', error);
+            }
+        }
+
+        function displayHistoryGraphs(historyData) {
+            // 既存のグラフを破棄
+            Object.values(historyCharts).forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            historyCharts = {};
+
+            // データを日付順にソート
+            const sortedData = historyData.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // ラベル（日付）とデータを準備
+            const labels = sortedData.map(item => {
+                const date = new Date(item.date);
+                return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+            });
+
+            // 抽出時間のグラフ
+            const extractionTimeCtx = document.getElementById('extractionTimeChart').getContext('2d');
+            historyCharts.extractionTime = new Chart(extractionTimeCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '抽出時間 (秒)',
+                        data: sortedData.map(item => item.extraction_time),
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '抽出時間の推移（過去1年）'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日付'
+                            },
+                            ticks: {
+                                maxTicksLimit: 12, // 月ごとに表示
+                                maxRotation: 45
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '秒'
+                            }
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
+
+            // グラム数のグラフ
+            const gramCtx = document.getElementById('gramChart').getContext('2d');
+            historyCharts.gram = new Chart(gramCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'グラム数 (g)',
+                        data: sortedData.map(item => item.gram),
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'グラム数の推移（過去1年）'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日付'
+                            },
+                            ticks: {
+                                maxTicksLimit: 12,
+                                maxRotation: 45
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'g'
+                            }
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
+
+            // メッシュ数のグラフ
+            const meshCtx = document.getElementById('meshChart').getContext('2d');
+            historyCharts.mesh = new Chart(meshCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'メッシュ数',
+                        data: sortedData.map(item => item.mesh),
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        tension: 0.1,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'メッシュ数の推移（過去1年）'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日付'
+                            },
+                            ticks: {
+                                maxTicksLimit: 12,
+                                maxRotation: 45
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'メッシュ'
+                            }
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
+
+            // グラフエリアを表示
+            document.getElementById('historyGraph').style.display = 'block';
+            // document.getElementById('historyGraph').scrollIntoView({ behavior: 'smooth' }); // 自動スクロールを無効化
         }
 
         function loadStatistics() {
@@ -333,7 +499,7 @@
                 <div class="card" style="margin-bottom: 1rem;">
                     <div class="grid grid-2">
                         <div>
-                            <strong>コーヒー豆:</strong> ${history.conditions.bean_name} (${history.conditions.bean_origin})
+                            <strong>コーヒー豆:</strong> ${history.conditions.bean_name}
                         </div>
                         <div>
                             <strong>条件:</strong> ${history.conditions.weather}, ${history.conditions.temperature}°C

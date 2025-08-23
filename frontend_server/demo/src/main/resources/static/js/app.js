@@ -22,7 +22,18 @@ class ApiService {
                     window.location.href = '/login';
                     return;
                 }
-                throw new Error(`HTTP error! status: ${response.status}`);
+                
+                // エラーレスポンスの詳細を取得
+                let errorData = null;
+                try {
+                    errorData = await response.text();
+                } catch (e) {
+                    errorData = `HTTP error! status: ${response.status}`;
+                }
+                
+                const error = new Error(`HTTP error! status: ${response.status}`);
+                error.response = { status: response.status, data: errorData };
+                throw error;
             }
             
             return await response.json();
