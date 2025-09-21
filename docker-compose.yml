@@ -1,0 +1,100 @@
+
+
+services:
+  # MySQLデータベース（最初に起動）
+  mysql:
+    image: mysql:8.0
+    container_name: coffee_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: demo_db
+      MYSQL_USER: demo_user
+      MYSQL_PASSWORD: demo_password
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql_init:/docker-entrypoint-initdb.d
+    networks:
+      - coffee_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Spring Boot (フロントエンド)（2番目に起動）
+  springboot:
+    build:
+      context: ./frontend_server/demo
+      dockerfile: Dockerfile
+    container_name: coffee_springboot
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/demo_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&useUnicode=true
+      - SPRING_DATASOURCE_USERNAME=demo_user
+      - SPRING_DATASOURCE_PASSWORD=demo_password
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - SPRING_JPA_SHOW_SQL=false
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - coffee_network
+    restart: unless-stopped
+
+  # FastAPI (バックエンド)（最後に起動）
+  fastapi:
+    build:
+      context: ./backend_server
+      dockerfile: Dockerfile
+    container_name: coffee_fastapi
+    ports:
+      - "8081:8081"
+    environment:
+      - DATABASE_URL=mysql://demo_user:demo_password@mysql:3306/demo_db
+      - DATA_INSERT_TYPE=final  # startup, monthly, final, none
+    depends_on:
+      mysql:
+        condition: service_healthy
+      springboot:
+        condition: service_started
+    networks:
+      - coffee_network
+    volumes:
+      - ./backend_server/model:/app/model
+      - ./backend_server/data:/app/data  # CSVファイル用
+    restart: unless-stopped
+
+  # データ挿入サービス（最後に実行）
+  insert_data:
+    build:
+      context: ./backend_server
+      dockerfile: Dockerfile
+    container_name: coffee_insert_data
+    environment:
+      - DATABASE_URL=mysql://demo_user:demo_password@mysql:3306/demo_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+      springboot:
+        condition: service_started
+      fastapi:
+        condition: service_started
+    networks:
+      - coffee_network
+    volumes:
+      - ./backend_server/data:/app/data  # CSVファイル用
+    command: python insert_data.py
+    restart: "no"
+
+volumes:
+  mysql_data:
+
+networks:
+  coffee_network:
+    driver: bridge

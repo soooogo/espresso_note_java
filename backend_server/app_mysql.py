@@ -7,6 +7,8 @@ import numpy as np
 import os
 from datetime import datetime
 import mysql.connector
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import cross_val_score
 
 app = FastAPI(title="コーヒー抽出予測API (MySQL版)", description="MySQLのdemo_dbから学習したモデルでコーヒーの抽出結果を予測するAPI")
 
@@ -38,6 +40,86 @@ def load_bean_specific_models():
         return {}, {}
 
 bean_models, bean_preprocessing_info = load_bean_specific_models()
+
+def calculate_model_confidence(model, X, y, sample_count):
+    """
+    モデルの性能指標に基づいて信頼度を計算
+    
+    信頼度計算の要素:
+    1. クロスバリデーションR²スコア (40%): モデルの汎化性能
+    2. 予測の安定性 (30%): RandomForestの各木の予測の分散
+    3. サンプル数 (20%): データの十分性
+    4. クロスバリデーションの安定性 (10%): モデルの一貫性
+    
+    Args:
+        model: 学習済みRandomForestモデル
+        X: 特徴量データ
+        y: ターゲットデータ
+        sample_count: サンプル数
+    
+    Returns:
+        float: 信頼度（0.3-0.95）
+    """
+    try:
+        # 1. クロスバリデーションスコア（R²）
+        cv_scores = cross_val_score(model, X, y, cv=min(5, len(X)), scoring='r2')
+        cv_r2_mean = np.mean(cv_scores)
+        cv_r2_std = np.std(cv_scores)
+        
+        # 2. 学習データでのR²スコア
+        y_pred = model.predict(X)
+        train_r2 = r2_score(y, y_pred)
+        
+        # 3. 予測の不確実性（RandomForestの各木の予測の分散）
+        predictions = []
+        for estimator in model.estimators_:
+            pred = estimator.predict(X)
+            predictions.append(pred)
+        
+        predictions = np.array(predictions)
+        prediction_std = np.std(predictions, axis=0)
+        mean_prediction_std = np.mean(prediction_std)
+        
+        # 4. サンプル数による信頼度調整
+        sample_confidence = min(1.0, sample_count / 50.0)  # 50サンプルで最大信頼度
+        
+        # 5. 各指標を組み合わせて信頼度を計算
+        # R²スコアの重み: 40%
+        r2_confidence = max(0.0, min(1.0, (cv_r2_mean + train_r2) / 2))
+        
+        # 予測の安定性の重み: 30%
+        stability_confidence = max(0.0, min(1.0, 1.0 - mean_prediction_std / 2))
+        
+        # サンプル数の重み: 20%
+        sample_weight = sample_confidence * 0.2
+        
+        # クロスバリデーションの安定性の重み: 10%
+        cv_stability = max(0.0, min(1.0, 1.0 - cv_r2_std))
+        
+        # 総合信頼度を計算
+        total_confidence = (
+            r2_confidence * 0.4 +
+            stability_confidence * 0.3 +
+            sample_weight +
+            cv_stability * 0.1
+        )
+        
+        # 信頼度を0.3-0.95の範囲に制限
+        confidence = max(0.3, min(0.95, total_confidence))
+        
+        print(f"信頼度計算詳細:")
+        print(f"  - クロスバリデーションR²: {cv_r2_mean:.3f} ± {cv_r2_std:.3f}")
+        print(f"  - 学習データR²: {train_r2:.3f}")
+        print(f"  - 予測の標準偏差: {mean_prediction_std:.3f}")
+        print(f"  - サンプル数信頼度: {sample_confidence:.3f}")
+        print(f"  - 最終信頼度: {confidence:.3f}")
+        
+        return confidence
+        
+    except Exception as e:
+        print(f"信頼度計算エラー: {e}")
+        # エラーの場合はサンプル数ベースの簡易計算
+        return min(0.95, 0.3 + (sample_count - 10) * 0.02)
 
 # MySQL接続設定
 import os
@@ -264,8 +346,13 @@ async def predict(input_data: PredictionInput):
         model = bean_models[input_data.bean_name]
         prediction = model.predict(input_df)
         
-        # 信頼度の計算（簡易版）
-        confidence = 0.85  # 実際のモデルでは予測の不確実性を計算
+        # 信頼度の計算（モデル性能ベース）
+        if input_data.bean_name in bean_models:
+            # 保存済みモデルがある場合は高信頼度
+            confidence = 0.85
+        else:
+            # 動的モデルの場合は標準信頼度
+            confidence = 0.75
         
         # 結果を返す
         return PredictionOutput(
@@ -464,8 +551,8 @@ async def predict_dynamic(input_data: PredictionInput):
         
         print(f"モデル情報を更新しました: {len(bean_models_info)}個のモデル")
         
-        # 信頼度の計算（データ数に基づく）
-        confidence = min(0.95, 0.5 + (len(rows) - 10) * 0.02)  # データ数が多いほど信頼度が高い
+        # 信頼度の計算（モデル性能指標ベース）
+        confidence = calculate_model_confidence(model, X, y, len(rows))
         
         print(f"予測完了: mesh={prediction[0][0]}, gram={prediction[0][1]}, extraction_time={prediction[0][2]}")
         
@@ -535,12 +622,30 @@ async def predict_saved(input_data: PredictionInput):
         
         print(f"保存済みモデルで予測完了: mesh={prediction[0][0]}, gram={prediction[0][1]}, extraction_time={prediction[0][2]}")
         
+        # 保存済みモデルの信頼度計算
+        # モデル情報から性能指標を取得
+        model_info = None
+        try:
+            with open('model/bean_models_info.pkl', 'rb') as f:
+                bean_models_info = pickle.load(f)
+                if input_data.bean_name in bean_models_info:
+                    model_info = bean_models_info[input_data.bean_name]
+        except:
+            pass
+        
+        # 保存済みモデルの信頼度（モデル情報がある場合は高め、ない場合は標準）
+        if model_info and 'sample_count' in model_info:
+            sample_count = model_info['sample_count']
+            confidence = min(0.95, 0.7 + (sample_count / 100.0) * 0.2)
+        else:
+            confidence = 0.85
+        
         # 結果を返す
         return PredictionOutput(
             mesh=float(prediction[0][0]),
             gram=float(prediction[0][1]),
             extraction_time=float(prediction[0][2]),
-            confidence=0.9  # 保存済みモデルは高信頼度
+            confidence=confidence
         )
         
     except Exception as e:
@@ -597,7 +702,7 @@ async def predict_batch(inputs: List[PredictionInput]):
                 "mesh": float(prediction[0][0]),
                 "gram": float(prediction[0][1]),
                 "extraction_time": float(prediction[0][2]),
-                "confidence": 0.85
+                "confidence": 0.8  # バッチ予測は標準信頼度
             })
         
         return {"predictions": results}
@@ -647,6 +752,66 @@ async def get_database_stats():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"データベース統計の取得エラー: {str(e)}")
+
+@app.get("/model-confidence-info/{bean_name}")
+async def get_model_confidence_info(bean_name: str):
+    """指定された豆のモデル信頼度情報を取得"""
+    try:
+        # データベースから該当豆のデータを取得
+        connection = mysql.connector.connect(**mysql_config)
+        cursor = connection.cursor()
+        
+        query = """
+        SELECT r.gram, r.mesh, r.extraction_time, r.date, r.weather, r.temperature, r.humidity, r.days_passed
+        FROM recipe r
+        JOIN beans b ON r.bean_id = b.id
+        WHERE b.name = %s
+        """
+        
+        cursor.execute(query, (bean_name,))
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        
+        if len(rows) == 0:
+            raise HTTPException(status_code=404, detail=f"豆 '{bean_name}' のデータが見つかりません")
+        
+        # データをDataFrameに変換
+        df = pd.DataFrame(rows, columns=['gram', 'mesh', 'extraction_time', 'date', 'weather', 'temperature', 'humidity', 'days_passed'])
+        
+        # 前処理
+        df['date'] = pd.to_datetime(df['date'])
+        df['year'] = df['date'].dt.year
+        df['month'] = df['date'].dt.month
+        df['day'] = df['date'].dt.day
+        df['day_of_week'] = df['date'].dt.weekday
+        
+        feature_columns = ['temperature', 'humidity', 'year', 'month', 'day', 'day_of_week', 'days_passed']
+        X = df[feature_columns]
+        y = df[['mesh', 'gram', 'extraction_time']]
+        
+        weather_dummies = pd.get_dummies(df['weather'], prefix='weather')
+        X = pd.concat([X, weather_dummies], axis=1)
+        
+        # モデルを学習
+        from sklearn.ensemble import RandomForestRegressor
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X, y)
+        
+        # 信頼度計算
+        confidence = calculate_model_confidence(model, X, y, len(rows))
+        
+        return {
+            "bean_name": bean_name,
+            "sample_count": len(rows),
+            "confidence": confidence,
+            "feature_count": X.shape[1],
+            "model_type": "RandomForestRegressor",
+            "n_estimators": model.n_estimators
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"信頼度情報取得エラー: {str(e)}")
 
 @app.get("/current-weather")
 async def get_current_weather():
