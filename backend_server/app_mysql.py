@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import pickle
@@ -11,6 +12,15 @@ from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.model_selection import cross_val_score
 
 app = FastAPI(title="コーヒー抽出予測API (MySQL版)", description="MySQLのdemo_dbから学習したモデルでコーヒーの抽出結果を予測するAPI")
+
+# CORS設定を追加
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 開発環境用に全てのオリジンを許可
+    allow_credentials=False,  # 全てのオリジンを許可する場合はFalseにする
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 豆ごとのモデルと前処理情報の読み込み（オプション）
 def load_bean_specific_models():
@@ -815,7 +825,7 @@ async def get_model_confidence_info(bean_name: str):
 
 @app.get("/current-weather")
 async def get_current_weather():
-    """現在の京都の気象データを取得"""
+    """現在の京都の気象データを取得（無料版OpenWeatherMap API）"""
     try:
         from weather_data import WeatherDataCollector
         collector = WeatherDataCollector()
@@ -826,13 +836,18 @@ async def get_current_weather():
                 "location": "京都府京都市左京区",
                 "temperature": weather['temperature'],
                 "humidity": weather['humidity'],
-                "timestamp": datetime.now().isoformat()
+                "weather": weather.get('weather', 'Clear'),
+                "description": weather.get('description', ''),
+                "timestamp": datetime.now().isoformat(),
+                "note": "OpenWeatherMap API（無料版）から取得"
             }
         else:
             return {
                 "location": "京都府京都市左京区",
                 "temperature": 20.0,
                 "humidity": 60.0,
+                "weather": "Clear",
+                "description": "晴れ",
                 "timestamp": datetime.now().isoformat(),
                 "note": "APIキーが設定されていないため、デフォルト値を使用しています"
             }
@@ -841,8 +856,11 @@ async def get_current_weather():
             "location": "京都府京都市左京区",
             "temperature": 20.0,
             "humidity": 60.0,
+            "weather": "Clear",
+            "description": "晴れ",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e)
+            "error": str(e),
+            "note": "エラーが発生したため、デフォルト値を使用しています"
         }
 
 if __name__ == "__main__":

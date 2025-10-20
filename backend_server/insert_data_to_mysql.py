@@ -129,11 +129,68 @@ class DataInserter:
             print(f"データ結合エラー: {e}")
             return monthly_data
     
+    def check_csv_data_exists(self, cursor, df):
+        """CSVデータが既にデータベースに存在するかチェック"""
+        print("🔍 CSVデータの重複チェックを実行中...")
+        
+        existing_count = 0
+        total_csv_count = len(df)
+        
+        for _, row in df.iterrows():
+            try:
+                # bean_idを取得
+                cursor.execute("SELECT id FROM beans WHERE name = %s", (row['bean_name'],))
+                bean_result = cursor.fetchone()
+                
+                if bean_result:
+                    bean_id = bean_result[0]
+                    
+                    # 重複チェック: 同じbean_id、日付、抽出時間の組み合わせが既に存在するかチェック
+                    check_query = """
+                    SELECT COUNT(*) FROM recipe 
+                    WHERE bean_id = %s AND date = %s AND extraction_time = %s
+                    """
+                    cursor.execute(check_query, (
+                        bean_id,
+                        row['date'].strftime('%Y-%m-%d'),
+                        row['extraction_time']
+                    ))
+                    duplicate_count = cursor.fetchone()[0]
+                    
+                    if duplicate_count > 0:
+                        existing_count += 1
+                        
+            except Exception as e:
+                print(f"重複チェックエラー: {e}")
+                continue
+        
+        print(f"📊 重複チェック結果: {existing_count}/{total_csv_count} 件が既に存在")
+        return existing_count, total_csv_count
+
     def insert_to_mysql(self, df: pd.DataFrame):
-        """データをMySQLに挿入"""
+        """データをMySQLに挿入（厳密な重複チェック付き）"""
         try:
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor()
+            
+            # 重複チェックを実行
+            existing_count, total_count = self.check_csv_data_exists(cursor, df)
+            
+            # 重複率を計算
+            duplicate_rate = (existing_count / total_count) * 100 if total_count > 0 else 0
+            
+            if existing_count == total_count:
+                print(f"⚠️  CSVデータの100%が既に存在します。挿入をスキップします。")
+                cursor.close()
+                connection.close()
+                return 0
+            elif duplicate_rate > 80:
+                print(f"⚠️  CSVデータの{duplicate_rate:.1f}%が既に存在します。挿入をスキップします。")
+                cursor.close()
+                connection.close()
+                return 0
+            elif existing_count > 0:
+                print(f"ℹ️  CSVデータの{duplicate_rate:.1f}%が既に存在しますが、新規データを挿入します。")
             
             # データを挿入
             insert_query = """
@@ -142,6 +199,7 @@ class DataInserter:
             """
             
             inserted_count = 0
+            skipped_count = 0
             
             for _, row in df.iterrows():
                 try:
@@ -152,19 +210,38 @@ class DataInserter:
                     if bean_result:
                         bean_id = bean_result[0]
                         
-                        # データを挿入
-                        cursor.execute(insert_query, (
+                        # 重複チェック: 同じbean_id、日付、抽出時間の組み合わせが既に存在するかチェック
+                        check_query = """
+                        SELECT COUNT(*) FROM recipe 
+                        WHERE bean_id = %s AND date = %s AND extraction_time = %s
+                        """
+                        cursor.execute(check_query, (
                             bean_id,
                             row['date'].strftime('%Y-%m-%d'),
-                            row['weather'],
-                            row['temperature'],
-                            row['humidity'],
-                            row['gram'],
-                            row['mesh'],
-                            row['extraction_time'],
-                            row['days_passed']
+                            row['extraction_time']
                         ))
-                        inserted_count += 1
+                        duplicate_count = cursor.fetchone()[0]
+                        
+                        if duplicate_count == 0:
+                            # データを挿入
+                            cursor.execute(insert_query, (
+                                bean_id,
+                                row['date'].strftime('%Y-%m-%d'),
+                                row['weather'],
+                                row['temperature'],
+                                row['humidity'],
+                                row['gram'],
+                                row['mesh'],
+                                row['extraction_time'],
+                                row['days_passed']
+                            ))
+                            inserted_count += 1
+                        else:
+                            skipped_count += 1
+                            if skipped_count <= 5:  # 最初の5件のみログ出力
+                                print(f"重複データをスキップ: {row['date'].strftime('%Y-%m-%d')} - {row['bean_name']}")
+                            elif skipped_count == 6:
+                                print("... (重複データのスキップログを省略)")
                     else:
                         print(f"警告: 豆 '{row['bean_name']}' が見つかりません")
                         
@@ -176,7 +253,7 @@ class DataInserter:
             cursor.close()
             connection.close()
             
-            print(f"MySQL挿入完了: {inserted_count}件")
+            print(f"MySQL挿入完了: {inserted_count}件挿入, {skipped_count}件スキップ")
             return inserted_count
             
         except Exception as e:

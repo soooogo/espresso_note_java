@@ -199,8 +199,46 @@ def merge_data(monthly_data, weather_data):
         print(f"データ結合エラー: {e}")
         return monthly_data
 
+def check_csv_data_exists(cursor, merged_data):
+    """CSVデータが既にデータベースに存在するかチェック"""
+    print("🔍 CSVデータの重複チェックを実行中...")
+    
+    existing_count = 0
+    total_csv_count = len(merged_data)
+    
+    for _, row in merged_data.iterrows():
+        try:
+            # bean_idを取得
+            cursor.execute("SELECT id FROM beans WHERE name = %s", (row['bean_name'],))
+            bean_result = cursor.fetchone()
+            
+            if bean_result:
+                bean_id = bean_result[0]
+                
+                # 重複チェック: 同じbean_id、日付、抽出時間の組み合わせが既に存在するかチェック
+                check_query = """
+                SELECT COUNT(*) FROM recipe 
+                WHERE bean_id = %s AND date = %s AND extraction_time = %s
+                """
+                cursor.execute(check_query, (
+                    bean_id,
+                    row['date'].strftime('%Y-%m-%d'),
+                    row['extraction_time']
+                ))
+                duplicate_count = cursor.fetchone()[0]
+                
+                if duplicate_count > 0:
+                    existing_count += 1
+                    
+        except Exception as e:
+            print(f"重複チェックエラー: {e}")
+            continue
+    
+    print(f"📊 重複チェック結果: {existing_count}/{total_csv_count} 件が既に存在")
+    return existing_count, total_csv_count
+
 def insert_csv_data():
-    """CSVファイルからデータを挿入（insert_data_to_mysql.pyと同じ）"""
+    """CSVファイルからデータを挿入（厳密な重複チェック付き）"""
     try:
         mysql_config = get_mysql_config()
         connection = mysql.connector.connect(**mysql_config)
@@ -220,7 +258,28 @@ def insert_csv_data():
         print("3. データの結合...")
         merged_data = merge_data(monthly_data, weather_data)
         
-        # 4. MySQLに挿入
+        # 4. 重複チェックを実行
+        existing_count, total_count = check_csv_data_exists(cursor, merged_data)
+        
+        # 5. 重複率を計算
+        duplicate_rate = (existing_count / total_count) * 100 if total_count > 0 else 0
+        print(f"existing_count: {existing_count}")
+        print(f"total_count: {total_count}")
+        
+        if existing_count == total_count:
+            print(f"⚠️  CSVデータの100%が既に存在します。挿入をスキップします。")
+            cursor.close()
+            connection.close()
+            return 0
+        elif duplicate_rate > 80:
+            print(f"⚠️  CSVデータの{duplicate_rate:.1f}%が既に存在します。挿入をスキップします。")
+            cursor.close()
+            connection.close()
+            return 0
+        elif existing_count > 0:
+            print(f"ℹ️  CSVデータの{duplicate_rate:.1f}%が既に存在しますが、新規データを挿入します。")
+        
+        # 6. MySQLに挿入
         print("4. MySQLへの挿入...")
         insert_query = """
         INSERT INTO recipe (bean_id, date, weather, temperature, humidity, gram, mesh, extraction_time, days_passed)
@@ -228,6 +287,7 @@ def insert_csv_data():
         """
         
         inserted_count = 0
+        skipped_count = 0
         
         for _, row in merged_data.iterrows():
             try:
@@ -238,19 +298,38 @@ def insert_csv_data():
                 if bean_result:
                     bean_id = bean_result[0]
                     
-                    # データを挿入
-                    cursor.execute(insert_query, (
+                    # 重複チェック: 同じbean_id、日付、抽出時間の組み合わせが既に存在するかチェック
+                    check_query = """
+                    SELECT COUNT(*) FROM recipe 
+                    WHERE bean_id = %s AND date = %s AND extraction_time = %s
+                    """
+                    cursor.execute(check_query, (
                         bean_id,
                         row['date'].strftime('%Y-%m-%d'),
-                        row['weather'],
-                        row['temperature'],
-                        row['humidity'],
-                        row['gram'],
-                        row['mesh'],
-                        row['extraction_time'],
-                        row['days_passed']
+                        row['extraction_time']
                     ))
-                    inserted_count += 1
+                    duplicate_count = cursor.fetchone()[0]
+                    
+                    if duplicate_count == 0:
+                        # データを挿入
+                        cursor.execute(insert_query, (
+                            bean_id,
+                            row['date'].strftime('%Y-%m-%d'),
+                            row['weather'],
+                            row['temperature'],
+                            row['humidity'],
+                            row['gram'],
+                            row['mesh'],
+                            row['extraction_time'],
+                            row['days_passed']
+                        ))
+                        inserted_count += 1
+                    else:
+                        skipped_count += 1
+                        if skipped_count <= 5:  # 最初の5件のみログ出力
+                            print(f"重複データをスキップ: {row['date'].strftime('%Y-%m-%d')} - {row['bean_name']}")
+                        elif skipped_count == 6:
+                            print("... (重複データのスキップログを省略)")
                 else:
                     print(f"警告: 豆 '{row['bean_name']}' が見つかりません")
                     
@@ -262,7 +341,7 @@ def insert_csv_data():
         cursor.close()
         connection.close()
         
-        print(f"CSVデータ挿入完了: {inserted_count}件")
+        print(f"CSVデータ挿入完了: {inserted_count}件挿入, {skipped_count}件スキップ")
         return inserted_count
         
     except Exception as e:
@@ -271,6 +350,7 @@ def insert_csv_data():
 
 def main():
     """メイン関数"""
+    print("=== CSVデータ挿入スクリプト デバッグ開始 ===")
     print("🚀 CSVデータ挿入スクリプトを開始...")
     
     # Spring Bootの起動完了を待機
@@ -278,25 +358,27 @@ def main():
         print("⚠️  Spring Bootの起動を待機できませんでしたが、続行します")
     
     # 既存データを確認
+    print("\n📊 既存データの確認中...")
     user_count, bean_count, recipe_count = check_existing_data()
     
     # ユーザーと豆のデータが存在することを確認
     if user_count == 0 or bean_count == 0:
         print("❌ ユーザーまたはコーヒー豆のデータが存在しません。DataInitializerが実行されていることを確認してください。")
+        print("=== CSVデータ挿入スクリプト デバッグ終了（エラー） ===")
         sys.exit(1)
     
     print("✅ ユーザーとコーヒー豆のデータが確認されました")
     
     # CSVデータを挿入
-    print("📝 CSVデータを挿入します...")
+    print("\n📝 CSVデータを挿入します...")
     inserted_count = insert_csv_data()
     
     if inserted_count > 0:
         print(f"✅ CSVデータ挿入が完了しました！ {inserted_count}件のレシピデータを挿入しました")
     else:
-        print("❌ CSVデータの挿入に失敗しました")
+        print("ℹ️  CSVデータの挿入はスキップされました（既存データあり）")
     
-    print("✅ CSVデータ挿入スクリプトが完了しました！")
+    print("=== CSVデータ挿入スクリプト デバッグ終了 ===")
 
 if __name__ == "__main__":
     main()

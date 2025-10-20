@@ -17,7 +17,12 @@
         
         <!-- 予測フォーム -->
         <div class="card">
-            <h2>予測条件を入力</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>予測条件を入力</h2>
+                <button type="button" id="getWeatherBtn" class="btn btn-outline-secondary" onclick="getCurrentWeather()">
+                    <i class="weather-icon">🌤️</i> 天気取得
+                </button>
+            </div>
             <form id="predictForm">
                 <div class="grid grid-2">
                     <div class="form-group">
@@ -55,6 +60,11 @@
                     <div class="form-group">
                         <label for="humidity">湿度 (%) *</label>
                         <input type="number" id="humidity" name="humidity" class="form-control" step="1" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div id="weatherStatus" class="weather-status" style="display: none;">
+                        <span class="weather-info"></span>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">予測実行</button>
@@ -139,6 +149,101 @@
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date').value = today;
         }
+
+        // 天気API取得機能（無料版OpenWeatherMap API）
+        async function getCurrentWeather() {
+            const weatherBtn = document.getElementById('getWeatherBtn');
+            const weatherStatus = document.getElementById('weatherStatus');
+            const weatherInfo = weatherStatus.querySelector('.weather-info');
+            
+            // ボタンを無効化してローディング状態に
+            weatherBtn.disabled = true;
+            weatherBtn.innerHTML = '<i class="weather-icon">⏳</i> 取得中...';
+            weatherStatus.style.display = 'block';
+            weatherInfo.innerHTML = '京都の天気を取得中...';
+            weatherInfo.className = 'weather-info loading';
+            
+            try {
+                console.log('Starting weather API request...');
+                const response = await fetch('http://localhost:8081/current-weather');
+                console.log('API Response status:', response.status);
+                console.log('API Response headers:', response.headers);
+                console.log('Response OK:', response.ok);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const responseText = await response.text();
+                console.log('Raw response text:', responseText);
+                
+                let weatherData;
+                try {
+                    weatherData = JSON.parse(responseText);
+                    console.log('Parsed weather data:', weatherData);
+                } catch (parseError) {
+                    console.error('JSON parse error:', parseError);
+                    throw new Error(`JSON解析エラー: ${parseError.message}`);
+                }
+                
+                console.log('Temperature check:', weatherData?.temperature, typeof weatherData?.temperature);
+                console.log('Humidity check:', weatherData?.humidity, typeof weatherData?.humidity);
+                
+                if (weatherData && weatherData.temperature !== undefined && weatherData.humidity !== undefined) {
+                    // 気温と湿度をフォームに設定
+                    document.getElementById('temperature').value = Math.round(weatherData.temperature * 10) / 10;
+                    document.getElementById('humidity').value = Math.round(weatherData.humidity);
+                    
+                    // 天候も自動設定（簡易的な判定）
+                    const weatherSelect = document.getElementById('weather');
+                    if (weatherData.weather) {
+                        // APIから天候情報がある場合はそれを使用
+                        const weatherMap = {
+                            'Clear': '晴れ',
+                            'Clouds': '曇り',
+                            'Rain': '雨',
+                            'Snow': '雪',
+                            'Thunderstorm': '雨',
+                            'Drizzle': '雨',
+                            'Mist': '曇り',
+                            'Fog': '曇り'
+                        };
+                        const japaneseWeather = weatherMap[weatherData.weather] || '晴れ';
+                        weatherSelect.value = japaneseWeather;
+                    }
+                    
+                    // 成功メッセージ
+                    const location = weatherData.location || '京都';
+                    const description = weatherData.description || '';
+                    weatherInfo.innerHTML = `✅ 取得完了: ${weatherData.temperature}°C, 湿度${weatherData.humidity}% (${location}) ${description}`;
+                    weatherInfo.className = 'weather-info success';
+                    
+                    // 3秒後にメッセージを非表示
+                    setTimeout(() => {
+                        weatherStatus.style.display = 'none';
+                    }, 3000);
+                    
+                } else {
+                    console.error('Invalid weather data format:', weatherData);
+                    throw new Error(`天気データの形式が正しくありません。temperature: ${weatherData?.temperature}, humidity: ${weatherData?.humidity}`);
+                }
+                
+            } catch (error) {
+                console.error('天気取得エラー:', error);
+                weatherInfo.innerHTML = `❌ 天気取得に失敗しました: ${error.message}`;
+                weatherInfo.className = 'weather-info error';
+                
+                // 5秒後にメッセージを非表示
+                setTimeout(() => {
+                    weatherStatus.style.display = 'none';
+                }, 5000);
+            } finally {
+                // ボタンを元に戻す
+                weatherBtn.disabled = false;
+                weatherBtn.innerHTML = '<i class="weather-icon">🌤️</i> 天気取得';
+            }
+        }
+
 
         async function loadUserBeans() {
             try {

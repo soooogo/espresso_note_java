@@ -369,3 +369,72 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: #5a433f;
 }
+
+/* 天気取得機能のスタイル（無料版API） */
+.input-group {
+    display: flex;
+    align-items: stretch;
+}
+
+.input-group .form-control {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: 0;
+}
+
+.input-group .btn {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left: 1px solid #ddd;
+    white-space: nowrap;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+}
+
+.weather-icon {
+    font-size: 1.1em;
+    margin-right: 0.3rem;
+}
+
+.weather-status {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.weather-info {
+    display: flex;
+    align-items: center;
+    font-weight: 500;
+}
+
+.weather-info.loading {
+    color: #0d6efd;
+    background-color: #e7f3ff;
+    border: 1px solid #b3d9ff;
+}
+
+.weather-info.success {
+    color: #198754;
+    background-color: #e8f5e8;
+    border: 1px solid #b3e6b3;
+}
+
+.weather-info.error {
+    color: #dc3545;
+    background-color: #ffeaea;
+    border: 1px solid #ffb3b3;
+}
+
+#getWeatherBtn:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+
+#getWeatherBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+

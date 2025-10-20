@@ -235,7 +235,7 @@ public class PredictionController {
     @GetMapping("/weather")
     public ResponseEntity<?> getCurrentWeather() {
         try {
-            // OpenWeatherMap APIから京都の現在の気象データを取得
+            // OpenWeatherMap APIから京都の現在の気象データを取得（無料版）
             Map<String, Object> weatherData = getWeatherFromAPI();
             return ResponseEntity.ok(weatherData);
 
@@ -245,6 +245,8 @@ public class PredictionController {
             weatherData.put("location", "京都府京都市左京区");
             weatherData.put("temperature", 20.0);
             weatherData.put("humidity", 60.0);
+            weatherData.put("weather", "Clear");
+            weatherData.put("description", "晴れ");
             weatherData.put("timestamp", java.time.LocalDateTime.now().toString());
             weatherData.put("note", "API取得に失敗したため、デフォルト値を使用しています");
             
@@ -253,7 +255,7 @@ public class PredictionController {
     }
     
     private Map<String, Object> getWeatherFromAPI() throws Exception {
-        // OpenWeatherMap APIの設定
+        // OpenWeatherMap APIの設定（無料版）
         String apiKey = System.getenv("OPENWEATHER_API_KEY"); // 環境変数から取得
         if (apiKey == null || apiKey.isEmpty()) {
             throw new Exception("OpenWeatherMap APIキーが設定されていません");
@@ -285,13 +287,21 @@ public class PredictionController {
         
         // 必要なデータを抽出
         Map<String, Object> main = (Map<String, Object>) jsonResponse.get("main");
+        List<Map<String, Object>> weather = (List<Map<String, Object>>) jsonResponse.get("weather");
         Map<String, Object> weatherData = new HashMap<>();
         
         weatherData.put("location", "京都府京都市左京区");
         weatherData.put("temperature", main.get("temp"));
         weatherData.put("humidity", main.get("humidity"));
         weatherData.put("timestamp", java.time.LocalDateTime.now().toString());
-        weatherData.put("note", "OpenWeatherMap APIから取得");
+        weatherData.put("note", "OpenWeatherMap API（無料版）から取得");
+        
+        // 天候情報を追加
+        if (weather != null && !weather.isEmpty()) {
+            Map<String, Object> weatherInfo = weather.get(0);
+            weatherData.put("weather", weatherInfo.get("main"));
+            weatherData.put("description", weatherInfo.get("description"));
+        }
         
         return weatherData;
     }

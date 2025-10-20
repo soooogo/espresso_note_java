@@ -3,6 +3,7 @@ package com.example.demo.data;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
 
 import java.time.LocalDate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -15,6 +16,7 @@ import com.example.demo.repository.BeanRepository;
 import com.example.demo.repository.RecipeRepository;
 
 @Component
+@Profile("seed")
 public class DataInitializer implements CommandLineRunner {
     
     @Autowired
@@ -31,10 +33,25 @@ public class DataInitializer implements CommandLineRunner {
     
     @Override
     public void run(String... args) throws Exception {
-        // Clear existing data
-        recipeRepository.deleteAll();
-        beanRepository.deleteAll();
-        userRepository.deleteAll();
+        System.out.println("=== DataInitializer デバッグ開始 ===");
+        
+        // Check if data already exists
+        long userCount = userRepository.count();
+        long beanCount = beanRepository.count();
+        long recipeCount = recipeRepository.count();
+        
+        System.out.println("現在のデータベース状態:");
+        System.out.println("  ユーザー数: " + userCount);
+        System.out.println("  コーヒー豆数: " + beanCount);
+        System.out.println("  レシピ数: " + recipeCount);
+        
+        if (userCount > 0 || beanCount > 0 || recipeCount > 0) {
+            System.out.println("✅ 既存のデータが検出されました。データの初期化をスキップします。");
+            System.out.println("=== DataInitializer デバッグ終了（スキップ） ===");
+            return;
+        }
+        
+        System.out.println("データベースが空のため、サンプルデータを初期化します...");
         
         // Create multiple users with encoded passwords and roles
         User user1 = userRepository.save(new User("コーヒー愛好家", "coffee.lover@example.com", passwordEncoder.encode("password"), "ROLE_USER"));
@@ -95,9 +112,11 @@ public class DataInitializer implements CommandLineRunner {
         recipeRepository.save(new Recipe(u3b2, LocalDate.now().minusDays(1), "晴れ", 26.0f, 52, 17.8f, 2.1f, 27.0f, 14.0f));
         recipeRepository.save(new Recipe(u3b3, LocalDate.now().minusDays(3), "雪", 2.0f, 40, 19.0f, 2.6f, 34.0f, 20.0f));
 
-        System.out.println("エスプレッソアプリのサンプルデータが挿入されました！");
-        System.out.println("ユーザー数: " + userRepository.count());
-        System.out.println("コーヒー豆数: " + beanRepository.count());
-        System.out.println("レシピ数: " + recipeRepository.count());
+        System.out.println("✅ エスプレッソアプリのサンプルデータが挿入されました！");
+        System.out.println("最終データベース状態:");
+        System.out.println("  ユーザー数: " + userRepository.count());
+        System.out.println("  コーヒー豆数: " + beanRepository.count());
+        System.out.println("  レシピ数: " + recipeRepository.count());
+        System.out.println("=== DataInitializer デバッグ終了（初期化完了） ===");
     }
 }
