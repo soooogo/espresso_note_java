@@ -50,6 +50,9 @@ services:
     networks:
       - coffee_network
     restart: unless-stopped
+    volumes:
+      - ./frontend_server/demo/src/main/resources/templates:/app/templates:rw
+      - ./frontend_server/demo/src/main/resources/static:/app/static:rw
 
   # FastAPI (バックエンド)（最後に起動）
   fastapi:

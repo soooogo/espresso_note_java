@@ -16,11 +16,7 @@
         <p class="lead">コーヒー豆とレシピを管理し、最適なエスプレッソを抽出しましょう</p>
 
         <!-- 統計情報 -->
-        <div class="grid grid-3">
-            <div class="card">
-                <h3>ユーザー数</h3>
-                <div id="userCount" class="loading">読み込み中...</div>
-            </div>
+        <div class="grid grid-2">
             <div class="card">
                 <h3>コーヒー豆数</h3>
                 <div id="beanCount" class="loading">読み込み中...</div>
@@ -75,21 +71,11 @@
         async function loadDashboardData() {
             // 統計情報の読み込み
             await Promise.all([
-                loadUserCount(),
                 loadBeanCount(),
                 loadRecipeCount(),
                 loadRecentRecipes(),
                 loadPopularBeans()
             ]);
-        }
-
-        async function loadUserCount() {
-            try {
-                // 現在のユーザー情報を取得（ユーザー数は常に1）
-                document.getElementById('userCount').textContent = '1';
-            } catch (error) {
-                document.getElementById('userCount').textContent = 'エラー';
-            }
         }
 
         async function loadBeanCount() {

@@ -18,10 +18,11 @@
         <!-- 予測フォーム -->
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2>予測条件を入力</h2>
-                <button type="button" id="getWeatherBtn" class="btn btn-outline-secondary" onclick="getCurrentWeather()">
-                    <i class="weather-icon">🌤️</i> 天気取得
-                </button>
+                <h2>予測条件を入力
+                    <button type="button" id="getWeatherBtn" class="btn btn-outline-secondary" onclick="getCurrentWeather()">
+                        <i class="weather-icon">🌤️</i> 天気取得
+                    </button>
+                </h2>
             </div>
             <form id="predictForm">
                 <div class="grid grid-2">
@@ -124,6 +125,7 @@
     <script>
         let predictionHistory = [];
         let historyCharts = {};
+        let beanNameToId = {}; // bean name -> id map for saving recipes
 
         // ページ読み込み時の初期化
         document.addEventListener('DOMContentLoaded', async function() {
@@ -249,6 +251,9 @@
             try {
                 const beans = await ApiService.get('/predict/user-beans');
                 if (beans && beans.length > 0) {
+                    // build name->id map
+                    beanNameToId = {};
+                    beans.forEach(b => { if (b && b.name) beanNameToId[b.name] = b.id; });
                     populateBeanSelect(beans);
                 } else {
                     // 豆が登録されていない場合
@@ -353,11 +358,106 @@
                             </div>
                         </div>
                     </div>
+                    <div style="margin-top: 16px; text-align: right;">
+                        <button class="btn btn-primary" id="saveFromPredictionBtn">編集して保存</button>
+                    </div>
                 `;
+                // wire save button
+                const saveBtn = document.getElementById('saveFromPredictionBtn');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', () => openSaveModalFromPrediction(prediction, conditions));
+                }
             }
             
             resultDiv.style.display = 'block';
             resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function openSaveModalFromPrediction(prediction, conditions) {
+            const beanId = beanNameToId[conditions.bean_name];
+            if (!beanId) {
+                Utils.showAlert('この豆はIDを特定できません。豆の一覧を再読込してください。', 'danger');
+                return;
+            }
+
+            const modalContent = `
+                <form id="saveRecipeFromPredictionForm">
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>日付 *</label>
+                            <input type="date" name="date" class="form-control" value="${conditions.date}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>天候 *</label>
+                            <select name="weather" class="form-control" required>
+                                <option value="晴れ" ${conditions.weather === '晴れ' ? 'selected' : ''}>晴れ</option>
+                                <option value="曇り" ${conditions.weather === '曇り' ? 'selected' : ''}>曇り</option>
+                                <option value="雨" ${conditions.weather === '雨' ? 'selected' : ''}>雨</option>
+                                <option value="雪" ${conditions.weather === '雪' ? 'selected' : ''}>雪</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>気温 (°C) *</label>
+                            <input type="number" name="temperature" step="0.1" class="form-control" value="${conditions.temperature}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>湿度 (%) *</label>
+                            <input type="number" name="humidity" min="0" max="100" class="form-control" value="${conditions.humidity}" required>
+                        </div>
+                    </div>
+                    <div class="grid grid-3">
+                        <div class="form-group">
+                            <label>抽出量 (g) *</label>
+                            <input type="number" name="gram" step="0.1" class="form-control" value="${prediction.gram.toFixed(1)}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>挽き具合 *</label>
+                            <input type="number" name="mesh" step="0.1" class="form-control" value="${prediction.mesh.toFixed(1)}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>抽出時間 (秒) *</label>
+                            <input type="number" name="extraction_time" step="0.1" class="form-control" value="${prediction.extraction_time.toFixed(1)}" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>コーヒー豆</label>
+                        <input type="text" class="form-control" value="${conditions.bean_name}" disabled>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </form>
+            `;
+
+            Modal.show('予測結果を編集して保存', modalContent);
+
+            const formEl = document.getElementById('saveRecipeFromPredictionForm');
+            formEl.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!FormHandler.validateRequired(formEl)) {
+                    Utils.showAlert('必須項目を入力してください', 'danger');
+                    return;
+                }
+                const data = FormHandler.getFormData(formEl);
+                const recipeData = {
+                    date: data.date,
+                    weather: data.weather,
+                    temperature: parseFloat(data.temperature),
+                    humidity: parseInt(data.humidity),
+                    gram: parseFloat(data.gram),
+                    mesh: parseFloat(data.mesh),
+                    extraction_time: parseFloat(data.extraction_time),
+                    bean: { id: beanId }
+                };
+                try {
+                    await ApiService.post('/recipes', recipeData);
+                    Utils.showAlert('レシピを保存しました', 'success');
+                    Modal.hide(document.querySelector('.modal'));
+                } catch (err) {
+                    console.error('Failed to save recipe from prediction:', err);
+                    Utils.showAlert('レシピの保存に失敗しました', 'danger');
+                }
+            });
         }
 
         async function loadAndDisplayHistoryGraph(beanName) {

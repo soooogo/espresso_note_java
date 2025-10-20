@@ -16,7 +16,13 @@
         
         <!-- 新規レシピ作成フォーム -->
         <div class="card">
-            <h2>新規レシピ作成</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>新規レシピ作成
+                    <button type="button" id="getWeatherBtn" class="btn btn-outline-secondary" onclick="getCurrentWeather()">
+                        <i class="weather-icon">🌤️</i> 天気取得
+                    </button>
+                </h2>
+            </div>
             <form id="recipeForm">
                 <div class="grid grid-2">
                     <div class="form-group">
@@ -42,6 +48,11 @@
                     <div class="form-group">
                         <label for="humidity">湿度 (%) *</label>
                         <input type="number" id="humidity" name="humidity" class="form-control" min="0" max="100" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div id="weatherStatus" class="weather-status" style="display: none;">
+                        <span class="weather-info"></span>
                     </div>
                 </div>
                 <div class="grid grid-3">
@@ -110,6 +121,70 @@
                 Utils.showAlert('レシピページの読み込みに失敗しました', 'danger');
             }
         });
+
+        // 天気API取得機能（predictページと同仕様）
+        async function getCurrentWeather() {
+            const weatherBtn = document.getElementById('getWeatherBtn');
+            const weatherStatus = document.getElementById('weatherStatus');
+            const weatherInfo = weatherStatus.querySelector('.weather-info');
+            
+            weatherBtn.disabled = true;
+            weatherBtn.innerHTML = '<i class="weather-icon">⏳</i> 取得中...';
+            weatherStatus.style.display = 'block';
+            weatherInfo.innerHTML = '京都の天気を取得中...';
+            weatherInfo.className = 'weather-info loading';
+            
+            try {
+                const response = await fetch('http://localhost:8081/current-weather');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const responseText = await response.text();
+                let weatherData;
+                try {
+                    weatherData = JSON.parse(responseText);
+                } catch (parseError) {
+                    throw new Error(`JSON解析エラー: ${parseError.message}`);
+                }
+
+                if (weatherData && weatherData.temperature !== undefined && weatherData.humidity !== undefined) {
+                    document.getElementById('temperature').value = Math.round(weatherData.temperature * 10) / 10;
+                    document.getElementById('humidity').value = Math.round(weatherData.humidity);
+
+                    const weatherSelect = document.getElementById('weather');
+                    if (weatherData.weather) {
+                        const weatherMap = {
+                            'Clear': '晴れ',
+                            'Clouds': '曇り',
+                            'Rain': '雨',
+                            'Snow': '雪',
+                            'Thunderstorm': '雨',
+                            'Drizzle': '雨',
+                            'Mist': '曇り',
+                            'Fog': '曇り'
+                        };
+                        const japaneseWeather = weatherMap[weatherData.weather] || '晴れ';
+                        weatherSelect.value = japaneseWeather;
+                    }
+
+                    const location = weatherData.location || '京都';
+                    const description = weatherData.description || '';
+                    weatherInfo.innerHTML = `✅ 取得完了: ${weatherData.temperature}°C, 湿度${weatherData.humidity}% (${location}) ${description}`;
+                    weatherInfo.className = 'weather-info success';
+                    setTimeout(() => { weatherStatus.style.display = 'none'; }, 3000);
+                } else {
+                    throw new Error(`天気データの形式が正しくありません。temperature: ${weatherData?.temperature}, humidity: ${weatherData?.humidity}`);
+                }
+            } catch (error) {
+                console.error('天気取得エラー:', error);
+                weatherInfo.innerHTML = `❌ 天気取得に失敗しました: ${error.message}`;
+                weatherInfo.className = 'weather-info error';
+                setTimeout(() => { weatherStatus.style.display = 'none'; }, 5000);
+            } finally {
+                weatherBtn.disabled = false;
+                weatherBtn.innerHTML = '<i class="weather-icon">🌤️</i> 天気取得';
+            }
+        }
 
         function setupEventListeners() {
             // フォーム送信イベント

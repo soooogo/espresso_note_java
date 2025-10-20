@@ -23,8 +23,7 @@ EXPOSE 8081
 
 # データ挿入スクリプトをコピー
 COPY insert_data.py /app/insert_data.py
-COPY start_with_data.sh /app/start_with_data.sh
-RUN chmod +x /app/insert_data.py /app/start_with_data.sh
+RUN chmod +x /app/insert_data.py
 
 # アプリケーションを起動
-CMD ["/app/start_with_data.sh"]
+CMD ["uvicorn", "app_mysql:app", "--host", "0.0.0.0", "--port", "8081"]
