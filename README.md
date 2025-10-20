@@ -106,6 +106,12 @@ docker compose up -d
 - `GET /api/recipes` - レシピ一覧
 - `POST /api/recipes` - レシピ登録
 
+### モデル評価エンドポイント
+- `GET /model-confidence-info/{bean_name}` - モデルの信頼度と許容誤差内正解率
+  - 例: `GET /model-confidence-info/エチオピア%20イルガチェフェ`
+  - 許容誤差: mesh±0.1, gram±0.3g, extraction_time±5.0s
+  - レスポンス: 各項目の正解率と全体の正解率を返却
+
 ## データベース設計
 
 ### 主要テーブル

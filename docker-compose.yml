@@ -76,6 +76,7 @@ services:
     volumes:
       - ./backend_server/model:/app/model
       - ./backend_server/data:/app/data  # CSVファイル用
+      - ./backend_server/app_mysql.py:/app/app_mysql.py  # 開発用
     restart: unless-stopped
 
   # データ挿入サービス（最後に実行）

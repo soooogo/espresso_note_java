@@ -72,7 +72,7 @@ def calculate_model_confidence(model, X, y, sample_count):
     """
     try:
         # 1. クロスバリデーションスコア（R²）
-        cv_scores = cross_val_score(model, X, y, cv=min(5, len(X)), scoring='r2')
+        cv_scores = cross_val_score(model, X, y, cv=min(3, len(X)), scoring='r2')
         cv_r2_mean = np.mean(cv_scores)
         cv_r2_std = np.std(cv_scores)
         
@@ -120,7 +120,6 @@ def calculate_model_confidence(model, X, y, sample_count):
         print(f"信頼度計算詳細:")
         print(f"  - クロスバリデーションR²: {cv_r2_mean:.3f} ± {cv_r2_std:.3f}")
         print(f"  - 学習データR²: {train_r2:.3f}")
-        print(f"  - 予測の標準偏差: {mean_prediction_std:.3f}")
         print(f"  - サンプル数信頼度: {sample_confidence:.3f}")
         print(f"  - 最終信頼度: {confidence:.3f}")
         
@@ -808,6 +807,19 @@ async def get_model_confidence_info(bean_name: str):
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X, y)
         
+        # 許容誤差内正解率を計算
+        try:
+            y_pred = model.predict(X)
+            y_true = y.values
+            errors = np.abs(y_pred - y_true)
+            mesh_acc = float(np.mean(errors[:, 0] <= 0.1))
+            gram_acc = float(np.mean(errors[:, 1] <= 0.3))
+            time_acc = float(np.mean(errors[:, 2] <= 5.0))
+            overall_acc = float(np.mean((errors[:, 0] <= 0.1) & (errors[:, 1] <= 0.3) & (errors[:, 2] <= 5.0)))
+        except Exception as e:
+            print(f"Tolerance accuracy calculation error: {e}")
+            mesh_acc = gram_acc = time_acc = overall_acc = 0.0
+        
         # 信頼度計算
         confidence = calculate_model_confidence(model, X, y, len(rows))
         
@@ -817,7 +829,16 @@ async def get_model_confidence_info(bean_name: str):
             "confidence": confidence,
             "feature_count": X.shape[1],
             "model_type": "RandomForestRegressor",
-            "n_estimators": model.n_estimators
+            "n_estimators": model.n_estimators,
+            "tolerance_accuracy": {
+                "tolerance": {"mesh": 0.1, "gram": 0.3, "extraction_time": 5.0},
+                "per_target": {
+                    "mesh": mesh_acc,
+                    "gram": gram_acc,
+                    "extraction_time": time_acc
+                },
+                "overall": overall_acc
+            }
         }
         
     except Exception as e:
