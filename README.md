@@ -140,6 +140,7 @@ docker compose up -d
 
 ### モデル
 - RandomForestRegressor
+- NN?
 - 豆種別の個別モデル対応
 
 ### モデル評価指標

@@ -9,7 +9,8 @@ import os
 from datetime import datetime
 import mysql.connector
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.preprocessing import StandardScaler
 
 app = FastAPI(title="コーヒー抽出予測API (MySQL版)", description="MySQLのdemo_dbから学習したモデルでコーヒーの抽出結果を予測するAPI")
 
@@ -434,10 +435,28 @@ async def predict_dynamic(input_data: PredictionInput):
         
         print(f"特徴量数: {X.shape[1]}, サンプル数: {X.shape[0]}")
         
-        # モデルを学習
+        # RandomForest で学習（元の方式に戻す）
         from sklearn.ensemble import RandomForestRegressor
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X, y)
+
+        # 以下の NN 学習コードは参考用に残してコメントアウト
+        # from sklearn.preprocessing import StandardScaler
+        # from sklearn.neural_network import MLPRegressor
+        # scaler = StandardScaler()
+        # X_scaled = scaler.fit_transform(X)
+        # model = MLPRegressor(
+        #     hidden_layer_sizes=(32, 16),
+        #     activation='relu',
+        #     solver='adam',
+        #     alpha=1e-3,
+        #     learning_rate_init=1e-3,
+        #     max_iter=5000,
+        #     early_stopping=True,
+        #     n_iter_no_change=20,
+        #     random_state=42
+        # )
+        # model.fit(X_scaled, y)
         
         # モデルと前処理情報を保存
         import pickle
@@ -499,10 +518,10 @@ async def predict_dynamic(input_data: PredictionInput):
         
         # 特徴量の順序を統一
         input_df = input_df[X.columns]
-        
+
         print(f"入力データの特徴量数: {input_df.shape[1]}")
         
-        # 予測実行
+        # 予測実行（multi-output, RandomForest）
         prediction = model.predict(input_df)
         
         # 特徴量の重要度を確認
@@ -725,8 +744,7 @@ async def get_model_info():
     return {
         "feature_names": preprocessing_info['feature_names'],
         "target_names": preprocessing_info['target_names'],
-        "model_type": "RandomForestRegressor",
-        "n_estimators": model.n_estimators if hasattr(model, 'n_estimators') else None,
+        "model_type": "MLPRegressor",
         "data_source": preprocessing_info.get('data_source', 'mysql_demo_db'),
         "categorical_columns": preprocessing_info.get('categorical_columns', []),
         "numerical_columns": preprocessing_info.get('numerical_columns', [])
@@ -802,15 +820,40 @@ async def get_model_confidence_info(bean_name: str):
         weather_dummies = pd.get_dummies(df['weather'], prefix='weather')
         X = pd.concat([X, weather_dummies], axis=1)
         
-        # モデルを学習
+        # 学習用と検証用に分割（9:1）
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.1, random_state=42
+        )
+        
+        # RandomForest で学習（評価ロジックはそのまま）
         from sklearn.ensemble import RandomForestRegressor
         model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X, y)
+        model.fit(X_train, y_train)
         
-        # 許容誤差内正解率を計算
+        # 以下の NN + スケーリングのコードは参考用としてコメントアウトで残す
+        # x_scaler = StandardScaler()
+        # X_train_scaled = x_scaler.fit_transform(X_train)
+        # X_test_scaled = x_scaler.transform(X_test)
+        # y_scaler = StandardScaler()
+        # y_train_scaled = y_scaler.fit_transform(y_train)
+        # from sklearn.neural_network import MLPRegressor
+        # model = MLPRegressor(
+        #     hidden_layer_sizes=(32, 16),
+        #     activation='relu',
+        #     solver='adam',
+        #     alpha=1e-3,
+        #     learning_rate_init=1e-3,
+        #     max_iter=5000,
+        #     early_stopping=True,
+        #     n_iter_no_change=20,
+        #     random_state=42
+        # )
+        # model.fit(X_train_scaled, y_train_scaled)
+        
+        # 許容誤差内正解率を計算（検証データで評価）
         try:
-            y_pred = model.predict(X)
-            y_true = y.values
+            y_pred = model.predict(X_test)
+            y_true = y_test.values
             errors = np.abs(y_pred - y_true)
             mesh_acc = float(np.mean(errors[:, 0] <= 0.1))
             gram_acc = float(np.mean(errors[:, 1] <= 0.3))
@@ -820,16 +863,15 @@ async def get_model_confidence_info(bean_name: str):
             print(f"Tolerance accuracy calculation error: {e}")
             mesh_acc = gram_acc = time_acc = overall_acc = 0.0
         
-        # 信頼度計算
-        confidence = calculate_model_confidence(model, X, y, len(rows))
+        # 信頼度計算（学習データベース）
+        confidence = calculate_model_confidence(model, X_train, y_train, len(rows))
         
         return {
             "bean_name": bean_name,
             "sample_count": len(rows),
+            "eval_sample_count": len(y_test),
             "confidence": confidence,
             "feature_count": X.shape[1],
-            "model_type": "RandomForestRegressor",
-            "n_estimators": model.n_estimators,
             "tolerance_accuracy": {
                 "tolerance": {"mesh": 0.1, "gram": 0.3, "extraction_time": 5.0},
                 "per_target": {
