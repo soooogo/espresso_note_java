@@ -437,7 +437,7 @@ async def predict_dynamic(input_data: PredictionInput):
         
         # RandomForest で学習（元の方式に戻す）
         from sklearn.ensemble import RandomForestRegressor
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model = RandomForestRegressor(n_estimators=100 random_state=42)
         model.fit(X, y)
 
         # 以下の NN 学習コードは参考用に残してコメントアウト
